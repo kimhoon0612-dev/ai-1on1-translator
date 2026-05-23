@@ -94,15 +94,11 @@ export class RoomManager {
 
       // ✅ BUG-1 수정: 번역된 오디오 전송 라우팅
       aiSession.on('audio_delta', (pcmBuffer) => {
-        if (this.mode === 'solo') {
-          // 단독 모드: 번역된 음성을 다시 본인에게 들려줌
-          this.bridge.pushAudio(p.identity, pcmBuffer);
-        } else {
-          // 1:1 모드: 상대방에게 전송
-          for (const [otherId] of this.participants) {
-            if (otherId !== p.identity) {
-              this.bridge.pushAudio(otherId, pcmBuffer);
-            }
+        // 1:1 모드: 나의 번역본은 상대방만 들어야 함
+        // solo 모드: 내가 말한 것(또는 영상소리)의 번역을 내가 들어야 함
+        for (const [targetIdentity, targetData] of this.participants.entries()) {
+          if (this.mode === 'solo' || targetIdentity !== p.identity) {
+            this.bridge.pushAudio(targetIdentity, pcmBuffer);
           }
         }
       });

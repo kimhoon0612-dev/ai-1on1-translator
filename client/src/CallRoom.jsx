@@ -110,9 +110,9 @@ export default function CallRoom() {
           sender: data.speaker,
           text: data.text,
           lang: data.lang,
-          isMe: data.isMe,
           transcriptType: data.transcriptType,
-          timestamp: data.timestamp,
+          isMe: data.isMe,
+          timestamp: data.timestamp
         }]);
       } else if (data.type === 'room_ended') {
         setError('통화가 종료되었습니다.');
