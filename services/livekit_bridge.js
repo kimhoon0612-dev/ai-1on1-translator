@@ -95,11 +95,15 @@ export class LiveKitBridge extends EventEmitter {
       this.audioStreams.set(identity, stream);
 
       for await (const frame of stream) {
-        const pcmData = Buffer.from(frame.data.buffer, frame.data.byteOffset, frame.data.byteLength);
+        // C++ 네이티브 메모리 참조 오류(Segfault) 방지를 위해 딥카피(Deep Copy) 수행
+        const rawBuffer = Buffer.from(frame.data.buffer, frame.data.byteOffset, frame.data.byteLength);
+        const pcmData = Buffer.alloc(rawBuffer.length);
+        rawBuffer.copy(pcmData);
+        
         this.emit('audio_received', { identity, pcmData });
       }
     } catch (err) {
-      console.error(`[Bridge ${this.roomId}] Audio stream error for ${identity}:`, err.message);
+      console.error(`[Bridge ${this.roomId}] ❌ 오디오 스트림 오류:`, err);
     }
   }
 
