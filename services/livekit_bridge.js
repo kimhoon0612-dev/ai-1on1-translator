@@ -109,19 +109,18 @@ export class LiveKitBridge extends EventEmitter {
 
   async createOutboundTrack(targetIdentity) {
     if (this.outboundTracks.has(targetIdentity)) return;
-
-    // OpenAI가 실시간보다 훨씬 빠르게 오디오를 생성하므로 기본 큐 사이즈(1초)를 100초(100000ms)로 늘려 버퍼 오버플로우(InvalidState) 방지
-    const source = new AudioSource(TARGET_SAMPLE_RATE, TARGET_CHANNELS, 100000);
-    const trackName = `trans_for_${targetIdentity}`;
-    const track = LocalAudioTrack.createAudioTrack(trackName, source);
-    
-    await this.room.localParticipant.publishTrack(track, {
-      name: trackName,
-      source: TrackSource.SOURCE_MICROPHONE,
-    });
-
-    this.outboundTracks.set(targetIdentity, { source, track });
-    console.log(`[Bridge ${this.roomId}] 📤 Outbound track created for ${targetIdentity}`);
+    try {
+      // 큐 사이즈를 10초(10000ms)로 안정적으로 설정
+      const source = new AudioSource(TARGET_SAMPLE_RATE, TARGET_CHANNELS, 10000);
+      const trackName = `trans_for_${targetIdentity}`;
+      const track = LocalAudioTrack.createAudioTrack(trackName, source);
+      
+      await this.room.localParticipant.publishTrack(track);
+      this.outboundTracks.set(targetIdentity, { source, track });
+      console.log(`[Bridge ${this.roomId}] 📤 Outbound track created for ${targetIdentity}`);
+    } catch (err) {
+      console.error(`[Bridge ${this.roomId}] Outbound track 생성 실패:`, err);
+    }
   }
 
   async pushAudio(targetIdentity, pcmBuffer) {
