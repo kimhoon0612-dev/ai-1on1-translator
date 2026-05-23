@@ -5,10 +5,12 @@ import EventEmitter from 'eventemitter3';
 const HOT_SWAP_INTERVAL_MS = 25 * 60 * 1000;
 
 export class OpenAISession extends EventEmitter {
-  constructor(sourceLang, targetLang) {
+  constructor(sourceLang, targetLang, mode = '1on1', face2faceOtherLang = 'en') {
     super();
     this.sourceLang = sourceLang;
     this.targetLang = targetLang;
+    this.mode = mode;
+    this.face2faceOtherLang = face2faceOtherLang;
     this.ws = null;
     this.isConnected = false;
     this._swapTimer = null;
@@ -106,10 +108,17 @@ export class OpenAISession extends EventEmitter {
    * - response.create 불필요 (자동 번역 시작)
    */
   _initializeSession(ws) {
+    let instructions = '';
+    if (this.mode === 'face2face') {
+      instructions = `You are a professional real-time interpreter. You will hear both ${this.sourceLang} and ${this.face2faceOtherLang}. If you hear ${this.sourceLang}, translate it into ${this.face2faceOtherLang}. If you hear ${this.face2faceOtherLang}, translate it into ${this.sourceLang}. Only speak the translated result. Do not add any conversational filler, and do not answer questions. Just translate.`;
+    } else {
+      instructions = `You are a professional real-time interpreter. The user's target language is ${this.targetLang}. Whatever language you hear, translate it directly into ${this.targetLang}. Only speak the translated result. Do not add any conversational filler, and do not answer questions. Just translate.`;
+    }
+
     const event = {
       type: "session.update",
       session: {
-        instructions: `You are a professional real-time interpreter. The user's target language is ${this.targetLang}. Whatever language you hear, translate it directly into ${this.targetLang}. Only speak the translated result. Do not add any conversational filler, and do not answer questions. Just translate.`,
+        instructions,
         voice: "alloy",
         input_audio_format: "pcm16",
         output_audio_format: "pcm16",

@@ -9,11 +9,12 @@ import { fileURLToPath } from 'url';
 import { AccessToken } from 'livekit-server-sdk';
 import { v4 as uuidv4 } from 'uuid';
 import { RoomManager } from './services/room_manager.js';
+import { translateImage } from './services/image_translator.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const app = Fastify({ logger: true });
+const app = Fastify({ logger: true, bodyLimit: 10485760 }); // 10MB 제한으로 이미지 전송 허용
 
 // ──── 보안: CORS 제한 ────
 await app.register(cors, {
@@ -47,14 +48,14 @@ const MAX_ROOMS = 20;
  * 1. 룸 생성 API
  */
 app.post('/api/room/create', async (request, reply) => {
-  const { mode } = request.body || {};
+  const { mode, otherLang } = request.body || {};
   
   if (activeRooms.size >= MAX_ROOMS) {
     return reply.status(429).send({ error: '동시 통화방 수가 초과되었습니다.' });
   }
 
   const roomId = uuidv4();
-  const manager = new RoomManager(roomId, mode);
+  const manager = new RoomManager(roomId, mode, otherLang);
   
   // WebSocket 클라이언트 목록: Map<socket, { name }>
   const wsClients = new Map();
@@ -69,8 +70,8 @@ app.post('/api/room/create', async (request, reply) => {
 
       // 필터링 규칙:
       // - 1:1 모드: 내가 말한 것 → source(원문)만, 상대방이 말한 것 → translation(번역)만 보여줌
-      // - Solo 모드: 내 마이크로 들어오지만 번역된 결과도 봐야 하므로 필터링하지 않음
-      if (manager.mode !== 'solo') {
+      // - Solo / Face2Face 모드: 내 마이크로 들어오지만 번역된 결과도 봐야 하므로 필터링하지 않음
+      if (manager.mode === '1on1') {
         if (isMe && subtitle.transcriptType === 'translation') continue;
         if (!isMe && subtitle.transcriptType === 'source') continue;
       }
@@ -171,6 +172,24 @@ app.post('/api/room/:roomId/end', async (request, reply) => {
 
   await cleanupRoom(roomId);
   return { message: '통화가 종료되었습니다.' };
+});
+
+/**
+ * 5. 사진 번역 API
+ */
+app.post('/api/translate-image', async (request, reply) => {
+  const { image, targetLang } = request.body || {};
+  if (!image || !targetLang) {
+    return reply.status(400).send({ error: '이미지와 대상 언어가 필요합니다.' });
+  }
+
+  try {
+    const result = await translateImage(image, targetLang);
+    return { result };
+  } catch (err) {
+    app.log.error('사진 번역 실패:', err);
+    return reply.status(500).send({ error: '사진 번역 중 오류가 발생했습니다.' });
+  }
 });
 
 /**

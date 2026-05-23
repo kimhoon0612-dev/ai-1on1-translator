@@ -2,9 +2,10 @@ import { LiveKitBridge } from './livekit_bridge.js';
 import { OpenAISession } from './openai_session.js';
 
 export class RoomManager {
-  constructor(roomId, mode = '1on1') {
+  constructor(roomId, mode = '1on1', face2faceOtherLang = 'en') {
     this.roomId = roomId;
     this.mode = mode;
+    this.face2faceOtherLang = face2faceOtherLang;
     this.bridge = new LiveKitBridge(roomId);
     this.participants = new Map(); // identity -> { lang, targetLang, aiSession, name }
     this.pendingLanguages = new Map(); // participantName -> language (토큰 발급 시 설정)
@@ -65,7 +66,7 @@ export class RoomManager {
       }
 
       // OpenAI 세션 생성
-      const aiSession = new OpenAISession(lang, targetLang);
+      const aiSession = new OpenAISession(lang, targetLang, this.mode, this.face2faceOtherLang);
       
       try {
         await aiSession.connect();

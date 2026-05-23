@@ -24,6 +24,7 @@ const LANGUAGES = [
 function Home() {
   const [name, setName] = useState('');
   const [language, setLanguage] = useState('ko');
+  const [otherLanguage, setOtherLanguage] = useState('en');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
@@ -34,10 +35,10 @@ function Home() {
       const res = await fetch('/api/room/create', { 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode })
+        body: JSON.stringify({ mode, otherLang: otherLanguage })
       });
       const data = await res.json();
-      navigate(`/call/${data.roomId}?name=${encodeURIComponent(name)}&lang=${language}&mode=${mode}`);
+      navigate(`/call/${data.roomId}?name=${encodeURIComponent(name)}&lang=${language}&otherLang=${otherLanguage}&mode=${mode}`);
     } catch (err) {
       alert('방 생성에 실패했습니다. 서버가 실행 중인지 확인하세요.');
     }
@@ -61,25 +62,45 @@ function Home() {
           />
         </div>
 
-        <div className="input-group">
-          <label className="input-label">내가 사용하는 언어</label>
-          <select 
-            value={language} 
-            onChange={(e) => setLanguage(e.target.value)}
-            className="language-select"
-          >
-            {LANGUAGES.map(l => (
-              <option key={l.code} value={l.code}>{l.name}</option>
-            ))}
-          </select>
+        <div className="input-group" style={{ display: 'flex', gap: '10px' }}>
+          <div style={{ flex: 1 }}>
+            <label className="input-label">내 언어</label>
+            <select 
+              value={language} 
+              onChange={(e) => setLanguage(e.target.value)}
+              className="language-select"
+            >
+              {LANGUAGES.map(l => (
+                <option key={l.code} value={l.code}>{l.name}</option>
+              ))}
+            </select>
+          </div>
+          <div style={{ flex: 1 }}>
+            <label className="input-label">상대방 언어</label>
+            <select 
+              value={otherLanguage} 
+              onChange={(e) => setOtherLanguage(e.target.value)}
+              className="language-select"
+            >
+              {LANGUAGES.map(l => (
+                <option key={l.code} value={l.code}>{l.name}</option>
+              ))}
+            </select>
+          </div>
         </div>
         
-        <div style={{ display: 'flex', gap: '10px', marginTop: '1rem' }}>
-          <button className="btn primary" onClick={() => createRoom('1on1')} disabled={loading} style={{ flex: 1 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '1rem' }}>
+          <button className="btn primary" onClick={() => createRoom('1on1')} disabled={loading}>
             📞 {loading ? '연결 중...' : '1:1 통화'}
           </button>
-          <button className="btn secondary" onClick={() => createRoom('solo')} disabled={loading} style={{ flex: 1, backgroundColor: '#3b82f6' }}>
+          <button className="btn secondary" onClick={() => createRoom('solo')} disabled={loading} style={{ backgroundColor: '#3b82f6' }}>
             🎧 {loading ? '대기 중...' : '혼자 듣기'}
+          </button>
+          <button className="btn primary" onClick={() => createRoom('face2face')} disabled={loading} style={{ backgroundColor: '#10b981', color: '#fff' }}>
+            🤝 대면 통역
+          </button>
+          <button className="btn secondary" onClick={() => navigate(`/camera?lang=${language}`)} disabled={loading} style={{ backgroundColor: '#8b5cf6', color: '#fff' }}>
+            📸 사진 번역
           </button>
         </div>
       </div>
@@ -140,12 +161,15 @@ function JoinRoom() {
   );
 }
 
+import CameraTranslator from './CameraTranslator';
+
 export default function App() {
   return (
     <Routes>
       <Route path="/" element={<Home />} />
       <Route path="/join/:roomId" element={<JoinRoom />} />
       <Route path="/call/:roomId" element={<CallRoom />} />
+      <Route path="/camera" element={<CameraTranslator />} />
     </Routes>
   );
 }

@@ -16,6 +16,7 @@ export default function CallRoom() {
   const language = searchParams.get('lang') || 'ko';
   const mode = searchParams.get('mode') || '1on1';
   const isSolo = mode === 'solo';
+  const isFace2Face = mode === 'face2face';
 
   const [token, setToken] = useState('');
   const [serverUrl, setServerUrl] = useState('');
@@ -182,7 +183,7 @@ export default function CallRoom() {
       <div className="call-header">
         <div className="call-header-top">
           <div className="call-info">
-            <h2>{isSolo ? '🎧 혼자 듣기 모드' : '🌐 1:1 통화방'}</h2>
+            <h2>{isFace2Face ? '🤝 대면 통역 모드' : isSolo ? '🎧 혼자 듣기 모드' : '🌐 1:1 통화방'}</h2>
             <span className={`status-badge ${connected ? 'online' : 'offline'}`}>
               {connected ? '● 작동 중' : '○ 준비 중...'}
             </span>
@@ -196,7 +197,7 @@ export default function CallRoom() {
           </button>
         </div>
         
-        {!isSolo && (
+        {!isSolo && !isFace2Face && (
           <div className="qr-section">
             <div className="qr-wrapper">
               <QRCodeSVG value={shareUrl} size={100} />
@@ -212,7 +213,7 @@ export default function CallRoom() {
       <div className="subtitles-container">
         {subtitles.length === 0 && (
           <div className="subtitle-empty">
-            <p>{isSolo ? '🎤 외국인의 말을 들려주세요. 번역되어 자막으로 나옵니다.' : '🎤 대화를 시작하면 여기에 실시간 자막이 표시됩니다'}</p>
+            <p>{isFace2Face ? '🎤 기기를 가운데 두고 번갈아 말씀하세요. 양방향으로 자동 통역됩니다.' : isSolo ? '🎤 외국인의 말을 들려주세요. 번역되어 자막으로 나옵니다.' : '🎤 대화를 시작하면 여기에 실시간 자막이 표시됩니다'}</p>
           </div>
         )}
         {subtitles.map(sub => (
