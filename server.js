@@ -136,7 +136,7 @@ app.post('/api/room/create', async (request, reply) => {
     return reply.status(500).send({ error: '통화방 생성에 실패했습니다.' });
   }
 
-  activeRooms.set(roomId, { createdAt: Date.now(), manager, wsClients });
+  activeRooms.set(roomId, { createdAt: Date.now(), manager, wsClients, mode: mode || '1on1' });
   return { roomId, message: '새 통화방이 생성되었습니다.' };
 });
 
