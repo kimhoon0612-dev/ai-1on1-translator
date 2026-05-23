@@ -108,6 +108,7 @@ export class OpenAISession extends EventEmitter {
     const event = {
       type: "session.update",
       session: {
+        type: "realtime",  // ✅ 필수 파라미터!
         // 텍스트 모달리티만 사용 (오디오 응답 생성 차단 → 비용 절감)
         modalities: ["text"],
         // 최소한의 지시 (실제 번역은 GPT-4o-mini에서 처리)
