@@ -28,10 +28,9 @@ export class OpenAISession extends EventEmitter {
 
   /**
    * WebSocket 연결 생성
-   * gpt-realtime-translate 전용 엔드포인트: /v1/realtime/translations
    */
   _createWebSocket(apiKey) {
-    const url = "wss://api.openai.com/v1/realtime/translations?model=gpt-realtime-translate";
+    const url = "wss://api.openai.com/v1/realtime?model=gpt-realtime";
     
     const ws = new WebSocket(url, {
       headers: {
@@ -118,15 +117,20 @@ export class OpenAISession extends EventEmitter {
     const event = {
       type: "session.update",
       session: {
+        type: "realtime",
         instructions,
-        voice: "alloy",
-        input_audio_format: "pcm16",
-        output_audio_format: "pcm16",
-        input_audio_transcription: {
-            model: "whisper-1"
-        },
-        turn_detection: {
-            type: "server_vad"
+        audio: {
+          input: {
+            transcription: {
+              model: "whisper-1"
+            },
+            turn_detection: {
+              type: "server_vad"
+            }
+          },
+          output: {
+            voice: "alloy"
+          }
         }
       }
     };
