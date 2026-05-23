@@ -123,13 +123,19 @@ export class LiveKitBridge extends EventEmitter {
     const outbound = this.outboundTracks.get(targetIdentity);
     if (!outbound) return;
 
-    const int16Data = new Int16Array(pcmBuffer.buffer, pcmBuffer.byteOffset, pcmBuffer.byteLength / 2);
-    const frame = new AudioFrame(int16Data, TARGET_SAMPLE_RATE, TARGET_CHANNELS, int16Data.length);
-    
     try {
+      const numSamples = Math.floor(pcmBuffer.length / 2);
+      if (numSamples === 0) return;
+
+      const int16Data = new Int16Array(numSamples);
+      for (let i = 0; i < numSamples; i++) {
+        int16Data[i] = pcmBuffer.readInt16LE(i * 2);
+      }
+
+      const frame = new AudioFrame(int16Data, TARGET_SAMPLE_RATE, TARGET_CHANNELS, int16Data.length);
       await outbound.source.captureFrame(frame);
     } catch (err) {
-      // 간헐적 에러 무시
+      console.error(`[Bridge ${this.roomId}] pushAudio 에러:`, err);
     }
   }
 
