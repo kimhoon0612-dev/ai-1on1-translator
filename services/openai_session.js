@@ -146,7 +146,7 @@ export class OpenAISession extends EventEmitter {
     
     try {
       this.ws.send(JSON.stringify({
-        type: "session.input_audio_buffer.append",
+        type: "input_audio_buffer.append",
         audio: pcmBuffer.toString('base64'),
       }));
     } catch (err) {
