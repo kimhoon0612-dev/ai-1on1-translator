@@ -134,25 +134,28 @@ app.post('/api/token', async (request, reply) => {
 /**
  * 3. 자막 WebSocket — 사용자 식별 포함
  */
-app.get('/ws/subtitles/:roomId', { websocket: true }, (socket, req) => {
-  const roomId = req.params.roomId;
-  const room = activeRooms.get(roomId);
-  
-  if (!room) {
-    socket.close(4004, '존재하지 않는 룸입니다.');
-    return;
-  }
+app.register(async function (fastify) {
+  fastify.get('/ws/subtitles/:roomId', { websocket: true }, (connection, req) => {
+    const socket = connection.socket;
+    const roomId = req.params.roomId;
+    const room = activeRooms.get(roomId);
+    
+    if (!room) {
+      socket.close(4004, '존재하지 않는 룸입니다.');
+      return;
+    }
 
-  // ✅ 쿼리에서 사용자 이름을 추출하여 per-user 필터링에 사용
-  const url = new URL(req.url, 'http://localhost');
-  const clientName = url.searchParams.get('name') || 'Guest';
+    // ✅ 쿼리에서 사용자 이름을 추출하여 per-user 필터링에 사용
+    const url = new URL(req.url, 'http://localhost');
+    const clientName = url.searchParams.get('name') || 'Guest';
 
-  room.wsClients.set(socket, { name: clientName });
-  app.log.info(`[WS] 자막 클라이언트: ${clientName} (room=${roomId}, 총 ${room.wsClients.size}명)`);
+    room.wsClients.set(socket, { name: clientName });
+    app.log.info(`[WS] 자막 클라이언트: ${clientName} (room=${roomId}, 총 ${room.wsClients.size}명)`);
 
-  socket.on('close', () => {
-    room.wsClients.delete(socket);
-    app.log.info(`[WS] 자막 해제: ${clientName} (room=${roomId}, 총 ${room.wsClients.size}명)`);
+    socket.on('close', () => {
+      room.wsClients.delete(socket);
+      app.log.info(`[WS] 자막 해제: ${clientName} (room=${roomId}, 총 ${room.wsClients.size}명)`);
+    });
   });
 });
 
