@@ -68,10 +68,12 @@ app.post('/api/room/create', async (request, reply) => {
       const isMe = subtitle.speaker === clientInfo.name;
 
       // 필터링 규칙:
-      // - 내가 말한 것 → source(원문)만 보여줌 (내가 뭐라 했는지 확인)
-      // - 상대방이 말한 것 → translation(번역)만 보여줌 (나한테 맞는 언어)
-      if (isMe && subtitle.transcriptType === 'translation') continue;
-      if (!isMe && subtitle.transcriptType === 'source') continue;
+      // - 1:1 모드: 내가 말한 것 → source(원문)만, 상대방이 말한 것 → translation(번역)만 보여줌
+      // - Solo 모드: 내 마이크로 들어오지만 번역된 결과도 봐야 하므로 필터링하지 않음
+      if (manager.mode !== 'solo') {
+        if (isMe && subtitle.transcriptType === 'translation') continue;
+        if (!isMe && subtitle.transcriptType === 'source') continue;
+      }
 
       const msg = JSON.stringify({
         type: 'subtitle',

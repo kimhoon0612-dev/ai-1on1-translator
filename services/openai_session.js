@@ -109,11 +109,16 @@ export class OpenAISession extends EventEmitter {
     const event = {
       type: "session.update",
       session: {
-        audio: {
-          output: {
-            language: this.targetLang,
-          },
+        instructions: `You are a professional real-time interpreter. The user's target language is ${this.targetLang}. Whatever language you hear, translate it directly into ${this.targetLang}. Only speak the translated result. Do not add any conversational filler, and do not answer questions. Just translate.`,
+        voice: "alloy",
+        input_audio_format: "pcm16",
+        output_audio_format: "pcm16",
+        input_audio_transcription: {
+            model: "whisper-1"
         },
+        turn_detection: {
+            type: "server_vad"
+        }
       }
     };
     ws.send(JSON.stringify(event));
