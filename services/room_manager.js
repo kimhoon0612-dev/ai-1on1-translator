@@ -84,6 +84,11 @@ export class RoomManager {
         name: p.name,
       });
 
+      // 에러 핸들러 추가 (에러 발생 시 서버 크래시 방지)
+      aiSession.on('error', (err) => {
+        console.error(`[Room ${this.roomId}] AI Session error for ${p.identity}:`, err);
+      });
+
       // 아웃바운드 트랙 준비 (나의 번역된 음성이 나갈 트랙)
       await this.bridge.createOutboundTrack(p.identity);
 
