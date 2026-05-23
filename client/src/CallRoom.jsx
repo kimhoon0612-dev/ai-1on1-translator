@@ -110,8 +110,17 @@ export default function CallRoom() {
       }
     };
 
-    ws.onclose = () => setConnected(false);
-    ws.onerror = (err) => console.error('[WS] 오류:', err);
+    ws.onclose = () => {
+      if (wsRef.current === ws) {
+        console.log('[WS] 자막 연결 끊김');
+        setConnected(false);
+      }
+    };
+    ws.onerror = (err) => {
+      if (wsRef.current === ws) {
+        console.error('[WS] 오류:', err);
+      }
+    };
 
     return () => ws.close();
   }, [token, roomId, name]);
