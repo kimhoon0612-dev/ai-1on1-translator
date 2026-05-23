@@ -37,17 +37,27 @@ async function test() {
   // Wait a bit to let OpenAI connect
   await new Promise(r => setTimeout(r, 2000));
   
-  // Send fake audio (1s of 24000Hz PCM)
-  console.log('Sending fake audio...');
-  const pcm = Buffer.alloc(48000); // 1s of silence
-  const participantData = manager.participants.get('user-123');
-  if (participantData && participantData.aiSession) {
-    participantData.aiSession.sendAudio(pcm);
+  // 1초 분량 440Hz 사인파
+  const sampleRate = 24000;
+  const duration = 1;
+  const numSamples = sampleRate * duration;
+  const pcmBuffer = Buffer.alloc(numSamples * 2);
+  for (let i = 0; i < numSamples; i++) {
+    const val = Math.floor(Math.sin(i * 440 * Math.PI * 2 / sampleRate) * 10000);
+    pcmBuffer.writeInt16LE(val, i * 2);
   }
+  
+  console.log('Sending fake audio...');
+  manager.bridge.emit('audio_received', { identity: 'user-123', pcmData: pcmBuffer });
   
   await new Promise(r => setTimeout(r, 5000));
   console.log('Done');
-  process.exit(0);
+  
+  // Wait for OpenAI response
+  setTimeout(() => {
+    console.log('Exiting test');
+    process.exit(0);
+  }, 5000);
 }
 
 test().catch(console.error);

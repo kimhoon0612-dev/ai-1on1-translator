@@ -15,13 +15,26 @@ import Fastify from 'fastify';
 const debugLogs = [];
 const originalLog = console.log;
 const originalError = console.error;
+
+function formatArg(a) {
+  if (a && a.stack) {
+    return a.stack;
+  } else if (a && a.message) {
+    return a.message;
+  }
+  if (typeof a === 'object') {
+    try { return JSON.stringify(a, Object.getOwnPropertyNames(a)); } catch (e) { return String(a); }
+  }
+  return a;
+}
+
 console.log = (...args) => {
-  debugLogs.push(`[LOG] ${new Date().toISOString()} ` + args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' '));
+  debugLogs.push(`[LOG] ${new Date().toISOString()} ` + args.map(formatArg).join(' '));
   if (debugLogs.length > 200) debugLogs.shift();
   originalLog(...args);
 };
 console.error = (...args) => {
-  debugLogs.push(`[ERR] ${new Date().toISOString()} ` + args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' '));
+  debugLogs.push(`[ERR] ${new Date().toISOString()} ` + args.map(formatArg).join(' '));
   if (debugLogs.length > 200) debugLogs.shift();
   originalError(...args);
 };
