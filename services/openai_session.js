@@ -109,11 +109,21 @@ export class OpenAISession extends EventEmitter {
    * gpt-realtime-translate 세션 설정
    */
   _initializeSession(ws) {
+    // 언어 코드 → 전체 이름 매핑 (OpenAI가 더 잘 이해)
+    const langNames = {
+      ko: 'Korean', en: 'English', ja: 'Japanese', zh: 'Chinese',
+      es: 'Spanish', fr: 'French', de: 'German', vi: 'Vietnamese',
+      th: 'Thai', id: 'Indonesian', ru: 'Russian', pt: 'Portuguese',
+    };
+    const targetName = langNames[this.targetLang] || this.targetLang;
+    const sourceName = langNames[this.sourceLang] || this.sourceLang;
+
     let instructions = '';
     if (this.mode === 'face2face') {
-      instructions = `You are a professional real-time interpreter. You will hear both ${this.sourceLang} and ${this.face2faceOtherLang}. If you hear ${this.sourceLang}, translate it into ${this.face2faceOtherLang}. If you hear ${this.face2faceOtherLang}, translate it into ${this.sourceLang}. Only speak the translated result. Do not add any conversational filler, and do not answer questions. Just translate.`;
+      const otherName = langNames[this.face2faceOtherLang] || this.face2faceOtherLang;
+      instructions = `You are a professional real-time interpreter. You will hear two languages: ${sourceName} and ${otherName}. When you hear ${sourceName}, translate it into ${otherName}. When you hear ${otherName}, translate it into ${sourceName}. IMPORTANT: You must ONLY output the translation. Never repeat the original. Never add commentary. Just translate.`;
     } else {
-      instructions = `You are a professional real-time interpreter. The user's target language is ${this.targetLang}. Whatever language you hear, translate it directly into ${this.targetLang}. Only speak the translated result. Do not add any conversational filler, and do not answer questions. Just translate.`;
+      instructions = `You are a professional real-time interpreter. Your ONLY job is to translate everything you hear into ${targetName}. CRITICAL RULES: 1) ALWAYS respond in ${targetName}, no exceptions. 2) If the audio is already in ${targetName}, still repeat it in ${targetName}. 3) Never respond in the source language. 4) Never add commentary or filler. 5) Just translate accurately and naturally into ${targetName}.`;
     }
 
     const event = {
@@ -137,7 +147,7 @@ export class OpenAISession extends EventEmitter {
       }
     };
     ws.send(JSON.stringify(event));
-    console.log(`[OpenAI] Session configured: ${this.sourceLang} → ${this.targetLang}`);
+    console.log(`[OpenAI] Session configured: ${sourceName}(${this.sourceLang}) → ${targetName}(${this.targetLang})`);
   }
 
   /**
