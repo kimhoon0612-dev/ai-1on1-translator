@@ -155,7 +155,11 @@ export class OpenAISession extends EventEmitter {
               model: "whisper-1"
             },
             turn_detection: {
-              type: "server_vad"
+              type: "server_vad",
+              // ✅ 순차→준동시통역: 짧은 무음에도 바로 번역 시작
+              silence_duration_ms: 300,   // 0.3초 무음이면 바로 번역 (기본값 500ms)
+              threshold: 0.5,             // 음성 감지 민감도 (0~1, 낮을수록 민감)
+              prefix_padding_ms: 300,     // 음성 시작 전 포함할 오디오 (0.3초)
             }
           },
           output: {
