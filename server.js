@@ -110,22 +110,26 @@ app.post('/api/room/create', async (request, reply) => {
 
       // 필터링 규칙:
       // - 1:1 모드: 내가 말한 것 → source(원문)만, 상대방이 말한 것 → translation(번역)만 보여줌
-      // - Solo / Face2Face 모드: 내 마이크로 들어오지만 번역된 결과도 봐야 하므로 필터링하지 않음
+      // - Solo / Face2Face 모드: 필터링하지 않음 (모든 자막 전송)
       if (manager.mode === '1on1') {
         if (isMe && subtitle.transcriptType === 'translation') continue;
         if (!isMe && subtitle.transcriptType === 'source') continue;
       }
 
-      const msg = JSON.stringify({
-        type: 'subtitle',
-        speaker: subtitle.speaker,
-        text: subtitle.text,
-        lang: subtitle.lang,
-        transcriptType: subtitle.transcriptType,
-        isMe,
-        timestamp: subtitle.timestamp,
-      });
-      ws.send(msg);
+      try {
+        const msg = JSON.stringify({
+          type: 'subtitle',
+          speaker: subtitle.speaker,
+          text: subtitle.text,
+          lang: subtitle.lang,
+          transcriptType: subtitle.transcriptType,
+          isMe,
+          timestamp: subtitle.timestamp,
+        });
+        ws.send(msg);
+      } catch (err) {
+        // WebSocket 전송 실패 시 조용히 무시
+      }
     }
   };
 
@@ -159,11 +163,14 @@ app.post('/api/token', async (request, reply) => {
     room.manager.setParticipantLanguage(participantName, language);
   }
 
+  // ✅ Identity에 UUID를 사용하여 충돌 방지
+  const identity = `${participantName}-${uuidv4().slice(0, 8)}`;
+
   const at = new AccessToken(
     process.env.LIVEKIT_API_KEY,
     process.env.LIVEKIT_API_SECRET,
     {
-      identity: `${participantName}-${Date.now()}`,
+      identity,
       name: participantName,
     }
   );
@@ -194,6 +201,18 @@ app.register(async function (fastify) {
 
     room.wsClients.set(socket, { name: clientName });
     app.log.info(`[WS] 자막 클라이언트: ${clientName} (room=${roomId}, 총 ${room.wsClients.size}명)`);
+
+    // ✅ 클라이언트 메시지 핸들링 (ping/pong)
+    socket.on('message', (data) => {
+      try {
+        const msg = JSON.parse(data.toString());
+        if (msg.type === 'ping') {
+          socket.send(JSON.stringify({ type: 'pong' }));
+        }
+      } catch (e) {
+        // 잘못된 메시지 무시
+      }
+    });
 
     socket.on('close', () => {
       room.wsClients.delete(socket);
@@ -240,10 +259,12 @@ async function cleanupRoom(roomId) {
   if (!room) return;
 
   for (const [ws] of room.wsClients) {
-    if (ws.readyState === 1) {
-      ws.send(JSON.stringify({ type: 'room_ended' }));
-      ws.close(1000, '통화가 종료되었습니다.');
-    }
+    try {
+      if (ws.readyState === 1) {
+        ws.send(JSON.stringify({ type: 'room_ended' }));
+        ws.close(1000, '통화가 종료되었습니다.');
+      }
+    } catch (e) { /* 무시 */ }
   }
   room.wsClients.clear();
 

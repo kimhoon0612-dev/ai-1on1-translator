@@ -87,6 +87,13 @@ export class LiveKitBridge extends EventEmitter {
 
   async _handleIncomingAudio(track, participant) {
     const identity = participant.identity;
+    
+    // 이미 이 참가자의 오디오를 처리 중이면 무시 (중복 방지)
+    if (this.audioStreams.has(identity)) {
+      console.log(`[Bridge ${this.roomId}] ⚠️ 이미 오디오 스트림 처리 중: ${identity}`);
+      return;
+    }
+
     console.log(`[Bridge ${this.roomId}] 🎤 오디오 스트림 시작: ${identity}`);
     this.emit('participant_connected', { identity, name: participant.name });
 
@@ -104,22 +111,30 @@ export class LiveKitBridge extends EventEmitter {
       }
     } catch (err) {
       console.error(`[Bridge ${this.roomId}] ❌ 오디오 스트림 오류:`, err);
+    } finally {
+      this.audioStreams.delete(identity);
     }
   }
 
   async createOutboundTrack(targetIdentity) {
-    if (this.outboundTracks.has(targetIdentity)) return;
+    if (this.outboundTracks.has(targetIdentity)) {
+      console.log(`[Bridge ${this.roomId}] ⚠️ Outbound track already exists for ${targetIdentity}`);
+      return;
+    }
+    
     try {
-      // 큐 사이즈를 10초(10000ms)로 안정적으로 설정
+      // 큐 사이즈를 10초(10000ms)로 설정 — AI가 빠르게 생성하는 오디오를 안전하게 버퍼링
       const source = new AudioSource(TARGET_SAMPLE_RATE, TARGET_CHANNELS, 10000);
       const trackName = `trans_for_${targetIdentity}`;
       const track = LocalAudioTrack.createAudioTrack(trackName, source);
       
-      await this.room.localParticipant.publishTrack(track);
+      await this.room.localParticipant.publishTrack(track, {
+        source: TrackSource.SOURCE_MICROPHONE,
+      });
       this.outboundTracks.set(targetIdentity, { source, track });
       console.log(`[Bridge ${this.roomId}] 📤 Outbound track created for ${targetIdentity}`);
     } catch (err) {
-      console.error(`[Bridge ${this.roomId}] Outbound track 생성 실패:`, err);
+      console.error(`[Bridge ${this.roomId}] ❌ Outbound track 생성 실패:`, err);
     }
   }
 
@@ -139,7 +154,10 @@ export class LiveKitBridge extends EventEmitter {
       const frame = new AudioFrame(int16Data, TARGET_SAMPLE_RATE, TARGET_CHANNELS, int16Data.length);
       await outbound.source.captureFrame(frame);
     } catch (err) {
-      console.error(`[Bridge ${this.roomId}] pushAudio 에러:`, err);
+      // captureFrame 에러는 빈번할 수 있으므로 한 줄 로그만
+      if (err.message && !err.message.includes('closed')) {
+        console.error(`[Bridge ${this.roomId}] pushAudio 에러:`, err.message);
+      }
     }
   }
 

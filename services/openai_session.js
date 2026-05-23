@@ -15,6 +15,10 @@ export class OpenAISession extends EventEmitter {
     this.isConnected = false;
     this._swapTimer = null;
     this._swapping = false;
+    // 번역 자막 중복 방지용
+    this._transcriptBuffer = '';
+    this._transcriptTimer = null;
+    this._lastDoneTranslation = '';
   }
 
   async connect() {
@@ -103,8 +107,6 @@ export class OpenAISession extends EventEmitter {
 
   /**
    * gpt-realtime-translate 세션 설정
-   * - session.audio.output.language 로 타겟 언어 설정
-   * - response.create 불필요 (자동 번역 시작)
    */
   _initializeSession(ws) {
     let instructions = '';
@@ -179,28 +181,39 @@ export class OpenAISession extends EventEmitter {
         }
         break;
 
-      // 번역 자막
+      // ✅ 번역 자막 완성 이벤트 (우선 처리)
       case 'session.output_transcript.done':
       case 'response.output_audio_transcript.done':
         if (event.transcript?.trim()) {
-          this.emit('transcript', { type: 'translation', text: event.transcript.trim() });
+          const text = event.transcript.trim();
+          // 델타 버퍼 즉시 클리어 (중복 방지)
+          if (this._transcriptTimer) {
+            clearTimeout(this._transcriptTimer);
+            this._transcriptTimer = null;
+          }
+          this._transcriptBuffer = '';
+          this._lastDoneTranslation = text;
+          this.emit('transcript', { type: 'translation', text });
         }
         break;
 
-      // 번역 자막 스트리밍 (완성 이벤트가 없을 경우를 대비해 델타를 모아서 처리)
+      // 번역 자막 스트리밍 (델타) - done 이벤트가 안 올 때 백업용
       case 'session.output_transcript.delta':
       case 'response.output_audio_transcript.delta':
         if (event.delta) {
-          if (!this._transcriptBuffer) this._transcriptBuffer = '';
           this._transcriptBuffer += event.delta;
           
           if (this._transcriptTimer) clearTimeout(this._transcriptTimer);
           this._transcriptTimer = setTimeout(() => {
             if (this._transcriptBuffer.trim()) {
-              this.emit('transcript', { type: 'translation', text: this._transcriptBuffer.trim() });
+              const text = this._transcriptBuffer.trim();
+              // ✅ done 이벤트로 이미 보낸 것과 동일하면 스킵 (중복 방지)
+              if (text !== this._lastDoneTranslation) {
+                this.emit('transcript', { type: 'translation', text });
+              }
               this._transcriptBuffer = '';
             }
-          }, 800); // 0.8초간 추가 입력이 없으면 문장 완성으로 간주
+          }, 1500); // 1.5초간 추가 입력 없으면 완성으로 간주 (done보다 넉넉히)
         }
         break;
 
@@ -218,14 +231,7 @@ export class OpenAISession extends EventEmitter {
         break;
 
       default:
-        // 기타 이벤트 디버그 로그
-        if (!['response.created', 'response.done', 'response.output_item.added', 
-             'response.output_item.done', 'response.content_part.added',
-             'response.content_part.done', 'response.audio.done',
-             'conversation.item.created', 'input_audio_buffer.speech_started',
-             'input_audio_buffer.speech_stopped', 'input_audio_buffer.committed'].includes(event.type)) {
-          console.log(`[OpenAI] Event: ${event.type}`);
-        }
+        // 기타 이벤트 — 불필요한 로그 줄이기
         break;
     }
   }
@@ -235,6 +241,10 @@ export class OpenAISession extends EventEmitter {
     if (this._swapTimer) {
       clearTimeout(this._swapTimer);
       this._swapTimer = null;
+    }
+    if (this._transcriptTimer) {
+      clearTimeout(this._transcriptTimer);
+      this._transcriptTimer = null;
     }
     if (this.ws) {
       try { this.ws.close(1000, 'Session ended'); } catch (e) {}

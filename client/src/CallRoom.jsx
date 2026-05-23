@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import {
   LiveKitRoom,
@@ -28,8 +28,15 @@ export default function CallRoom() {
 
   const subtitlesEndRef = useRef(null);
   const wsRef = useRef(null);
+  const mountedRef = useRef(true); // 컴포넌트 마운트 상태 추적
 
-  // 0. 마이크 권한 명시적 요청 (LiveKit 연결 전에 먼저 확보)
+  // 컴포넌트 마운트/언마운트 추적
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
+  // 0. 마이크 권한 명시적 요청
   useEffect(() => {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       setError('이 브라우저에서는 마이크를 사용할 수 없습니다. HTTPS 환경에서 접속해주세요.');
@@ -38,12 +45,16 @@ export default function CallRoom() {
     navigator.mediaDevices.getUserMedia({ audio: true })
       .then(stream => {
         stream.getTracks().forEach(t => t.stop());
-        setMicAllowed(true);
-        console.log('[Mic] 마이크 권한 획득 성공');
+        if (mountedRef.current) {
+          setMicAllowed(true);
+          console.log('[Mic] 마이크 권한 획득 성공');
+        }
       })
       .catch(err => {
         console.error('[Mic] 마이크 권한 거부:', err);
-        setError('마이크 권한이 필요합니다. 브라우저 설정에서 마이크를 허용해주세요.');
+        if (mountedRef.current) {
+          setError('마이크 권한이 필요합니다. 브라우저 설정에서 마이크를 허용해주세요.');
+        }
       });
   }, []);
 
@@ -52,9 +63,11 @@ export default function CallRoom() {
     subtitlesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [subtitles]);
 
-  // 1. 토큰 발급 (마이크 권한 획득 후)
+  // 1. 토큰 발급 (마이크 권한 획득 후, 한 번만)
+  const tokenFetchedRef = useRef(false);
   useEffect(() => {
-    if (!micAllowed) return;
+    if (!micAllowed || tokenFetchedRef.current) return;
+    tokenFetchedRef.current = true;
 
     const fetchToken = async () => {
       try {
@@ -68,82 +81,110 @@ export default function CallRoom() {
           throw new Error(data.error || '방에 입장할 수 없습니다.');
         }
         const data = await res.json();
-        setToken(data.token);
-        setServerUrl(data.livekitUrl);
+        if (mountedRef.current) {
+          setToken(data.token);
+          setServerUrl(data.livekitUrl);
+          console.log('[Token] 토큰 발급 성공');
+        }
       } catch (err) {
-        setError(err.message);
+        if (mountedRef.current) setError(err.message);
       }
     };
     fetchToken();
   }, [micAllowed, roomId, name, language]);
 
-  // 2. 자막 WebSocket
+  // 2. 자막 WebSocket (토큰 발급 후, 자동 재연결 포함)
+  const wsConnectRef = useRef(false);
   useEffect(() => {
-    if (!token) return;
+    if (!token || wsConnectRef.current) return;
+    wsConnectRef.current = true;
 
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${wsProtocol}//${window.location.host}/ws/subtitles/${roomId}?name=${encodeURIComponent(name)}`;
-    console.log('[WS] 연결 시도:', wsUrl);
-    
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
+    let ws = null;
+    let pingInterval = null;
+    let reconnectTimer = null;
+    let isClosed = false;
 
-    let pingInterval;
+    const connectWs = () => {
+      if (isClosed || !mountedRef.current) return;
 
-    ws.onopen = () => {
-      console.log('[WS] 자막 연결 성공');
-      setConnected(true);
+      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${wsProtocol}//${window.location.host}/ws/subtitles/${roomId}?name=${encodeURIComponent(name)}`;
+      console.log('[WS] 연결 시도:', wsUrl);
       
-      // Render 서버 유휴 연결 끊김 방지 (30초마다 핑 전송)
-      pingInterval = setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'ping' }));
+      ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        console.log('[WS] ✅ 자막 연결 성공');
+        if (mountedRef.current) setConnected(true);
+        
+        // 30초마다 핑 전송 (유휴 연결 끊김 방지)
+        pingInterval = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'ping' }));
+          }
+        }, 30000);
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'pong') return; // 핑 응답 무시
+          if (data.type === 'subtitle') {
+            setSubtitles(prev => {
+              const next = [...prev, {
+                id: Date.now() + Math.random(),
+                sender: data.speaker,
+                text: data.text,
+                lang: data.lang,
+                transcriptType: data.transcriptType,
+                isMe: data.isMe,
+                timestamp: data.timestamp
+              }];
+              // 최대 200개 유지 (메모리 관리)
+              return next.length > 200 ? next.slice(-200) : next;
+            });
+          } else if (data.type === 'room_ended') {
+            setError('통화가 종료되었습니다.');
+          }
+        } catch (e) {
+          console.error('[WS] 메시지 파싱 오류:', e);
         }
-      }, 30000);
-    };
+      };
 
-    ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.type === 'subtitle') {
-        setSubtitles(prev => [...prev, {
-          id: Date.now() + Math.random(),
-          sender: data.speaker,
-          text: data.text,
-          lang: data.lang,
-          transcriptType: data.transcriptType,
-          isMe: data.isMe,
-          timestamp: data.timestamp
-        }]);
-      } else if (data.type === 'room_ended') {
-        setError('통화가 종료되었습니다.');
-      }
-    };
+      ws.onclose = (event) => {
+        if (pingInterval) { clearInterval(pingInterval); pingInterval = null; }
+        console.log(`[WS] 연결 끊김 (code: ${event.code}, reason: ${event.reason})`);
+        if (mountedRef.current) setConnected(false);
+        
+        // 정상 종료(1000)나 컴포넌트 언마운트가 아니면 3초 후 재연결
+        if (!isClosed && mountedRef.current && event.code !== 1000) {
+          console.log('[WS] 3초 후 재연결 시도...');
+          reconnectTimer = setTimeout(connectWs, 3000);
+        }
+      };
 
-    ws.onclose = (event) => {
-      if (pingInterval) clearInterval(pingInterval);
-      if (wsRef.current === ws) {
-        console.log(`[WS] 자막 연결 끊김 (code: ${event.code}, reason: ${event.reason})`);
-        setConnected(false);
-      }
-    };
-    ws.onerror = (err) => {
-      if (wsRef.current === ws) {
+      ws.onerror = (err) => {
         console.error('[WS] 오류:', err);
-      }
+      };
     };
 
-    return () => ws.close();
-  }, [token, roomId, name]);
+    connectWs();
 
-  // (StrictMode 방 폭파 버그로 인해 언마운트 시 자동 방 종료 기능은 제거)
-  useEffect(() => {
-    // 빈 의존성 배열로 유지 (필요 시 다른 초기화 로직 추가)
-  }, [roomId]);
+    return () => {
+      isClosed = true;
+      if (pingInterval) clearInterval(pingInterval);
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (ws && ws.readyState !== WebSocket.CLOSED) {
+        ws.close(1000, 'Component unmount');
+      }
+    };
+  }, [token, roomId, name]);
 
   // 통화 종료
   const handleEndCall = async () => {
     try { await fetch(`/api/room/${roomId}/end`, { method: 'POST' }); } catch (e) {}
-    if (wsRef.current) wsRef.current.close();
+    if (wsRef.current) wsRef.current.close(1000, 'Call ended');
     navigate('/');
   };
 
@@ -192,7 +233,7 @@ export default function CallRoom() {
       data-lk-theme="default"
       style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: '#0f172a' }}
       onError={(err) => console.error('[LiveKit] Error:', err)}
-      onConnected={() => console.log('[LiveKit] Room 연결 완료')}
+      onConnected={() => console.log('[LiveKit] ✅ Room 연결 완료')}
       onDisconnected={() => console.log('[LiveKit] Room 연결 해제')}
       options={{
         audioCaptureDefaults: { autoGainControl: true, noiseSuppression: true, echoCancellation: true },
