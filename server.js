@@ -100,8 +100,10 @@ app.post('/api/room/create', async (request, reply) => {
   
   // ✅ 자막 per-user 필터링 콜백
   manager.onSubtitle = (subtitle) => {
-    for (const [ws, clientInfo] of wsClients) {
-      if (ws.readyState !== 1) continue; // OPEN이 아니면 스킵
+    const room = activeRooms.get(roomId);
+    if (!room) return;
+    for (const [ws, clientInfo] of room.wsClients.entries()) {
+      if (!ws || ws.readyState !== 1) continue; // OPEN이 아니면 스킵
 
       // 이 클라이언트(사용자) 입장에서 자막이 "나의 말"인지 판별
       const isMe = subtitle.speaker === clientInfo.name;
