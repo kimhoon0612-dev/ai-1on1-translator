@@ -88,9 +88,18 @@ export default function CallRoom() {
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
+    let pingInterval;
+
     ws.onopen = () => {
       console.log('[WS] 자막 연결 성공');
       setConnected(true);
+      
+      // Render 서버 유휴 연결 끊김 방지 (30초마다 핑 전송)
+      pingInterval = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'ping' }));
+        }
+      }, 30000);
     };
 
     ws.onmessage = (event) => {
@@ -110,9 +119,10 @@ export default function CallRoom() {
       }
     };
 
-    ws.onclose = () => {
+    ws.onclose = (event) => {
+      if (pingInterval) clearInterval(pingInterval);
       if (wsRef.current === ws) {
-        console.log('[WS] 자막 연결 끊김');
+        console.log(`[WS] 자막 연결 끊김 (code: ${event.code}, reason: ${event.reason})`);
         setConnected(false);
       }
     };
@@ -124,6 +134,11 @@ export default function CallRoom() {
 
     return () => ws.close();
   }, [token, roomId, name]);
+
+  // (StrictMode 방 폭파 버그로 인해 언마운트 시 자동 방 종료 기능은 제거)
+  useEffect(() => {
+    // 빈 의존성 배열로 유지 (필요 시 다른 초기화 로직 추가)
+  }, [roomId]);
 
   // 통화 종료
   const handleEndCall = async () => {
