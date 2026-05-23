@@ -1,5 +1,6 @@
 import { LiveKitBridge } from './livekit_bridge.js';
 import { OpenAISession } from './openai_session.js';
+import { translateText, textToSpeech } from './translate_tts.js';
 
 export class RoomManager {
   constructor(roomId, mode = '1on1', face2faceOtherLang = 'en') {
@@ -8,39 +9,26 @@ export class RoomManager {
     this.face2faceOtherLang = face2faceOtherLang;
     this.bridge = new LiveKitBridge(roomId);
     this.participants = new Map(); // identity -> { lang, targetLang, aiSession, name }
-    this.pendingLanguages = new Map(); // participantName -> language (토큰 발급 시 설정)
+    this.pendingLanguages = new Map(); // participantName -> language
     this.isStarted = false;
     this.onSubtitle = null; // 외부 콜백 (server.js에서 WebSocket 브로드캐스트용)
   }
 
-  /**
-   * 토큰 발급 시 클라이언트가 선택한 언어를 미리 등록
-   */
   setParticipantLanguage(participantName, language) {
     this.pendingLanguages.set(participantName, language);
   }
 
-  /**
-   * 상대방의 언어를 찾아서 반환
-   */
   _getOtherParticipantLang(myIdentity) {
     for (const [id, data] of this.participants) {
-      if (id !== myIdentity) {
-        return data.lang;
-      }
+      if (id !== myIdentity) return data.lang;
     }
     return null;
   }
 
-  /**
-   * 참가자의 언어를 결정
-   */
   _resolveLanguage(participantName) {
-    // 1. 토큰 발급 시 설정된 언어 확인
     if (this.pendingLanguages.has(participantName)) {
       return this.pendingLanguages.get(participantName);
     }
-    // 2. 기본값: 첫 번째는 ko, 두 번째는 en
     return this.participants.size === 0 ? 'ko' : 'en';
   }
 
@@ -50,82 +38,99 @@ export class RoomManager {
 
     await this.bridge.connect();
 
-    // 사용자가 방에 들어와서 오디오 트랙을 쏘기 시작하면 트리거
+    // ──── 참가자 입장 시 ────
     this.bridge.on('participant_connected', async (p) => {
       console.log(`[Room ${this.roomId}] Participant connected: ${p.identity} (${p.name})`);
       
       const lang = this._resolveLanguage(p.name);
       
-      // 타겟 언어 결정
       let targetLang;
       if (this.mode === 'solo') {
-        targetLang = lang; // 단독 모드는 본인 언어로 번역
+        targetLang = lang;
       } else {
         const otherLang = this._getOtherParticipantLang(p.identity);
         targetLang = otherLang || (lang === 'ko' ? 'en' : 'ko');
       }
 
-      // OpenAI 세션 생성
+      // ✅ OpenAI Realtime API — STT(음성인식) 전용
       const aiSession = new OpenAISession(lang, targetLang, this.mode, this.face2faceOtherLang);
       
       try {
         await aiSession.connect();
-        console.log(`[Room ${this.roomId}] OpenAI Session: ${p.identity} (${lang} -> ${targetLang})`);
+        console.log(`[Room ${this.roomId}] STT Session: ${p.identity} (${lang} → ${targetLang})`);
       } catch (err) {
-        console.error(`[Room ${this.roomId}] OpenAI Connection Failed for ${p.identity}:`, err.message);
-        // 연결 실패 시 participants에 등록하지 않음
+        console.error(`[Room ${this.roomId}] STT Connection Failed:`, err.message);
         return;
       }
 
-      this.participants.set(p.identity, {
-        lang,
-        targetLang,
-        aiSession,
-        name: p.name,
-      });
+      this.participants.set(p.identity, { lang, targetLang, aiSession, name: p.name });
 
-      // 에러 핸들러 추가 (에러 발생 시 서버 크래시 방지)
       aiSession.on('error', (err) => {
-        console.error(`[Room ${this.roomId}] AI Session error for ${p.identity}:`, err);
+        console.error(`[Room ${this.roomId}] STT error for ${p.identity}:`, err);
       });
 
-      // 아웃바운드 트랙 준비 (나의 번역된 음성이 나갈 트랙)
+      // 아웃바운드 트랙 준비
       await this.bridge.createOutboundTrack(p.identity);
 
-      // ✅ BUG-1 수정: 번역된 오디오 전송 라우팅
-      aiSession.on('audio_delta', (pcmBuffer) => {
-        // 1:1 모드: 나의 번역본은 상대방만 들어야 함
-        // solo 모드: 내가 말한 것(또는 영상소리)의 번역을 내가 들어야 함
-        for (const [targetIdentity, targetData] of this.participants.entries()) {
-          if (this.mode === 'solo' || targetIdentity !== p.identity) {
-            this.bridge.pushAudio(targetIdentity, pcmBuffer);
-          }
-        }
-      });
+      // ──────────────────────────────────────────────────────
+      // ✅ 핵심 파이프라인: STT → 번역(GPT-4o-mini) → TTS → 음성 출력
+      // ──────────────────────────────────────────────────────
+      aiSession.on('source_transcript', async (sourceText) => {
+        console.log(`[Pipeline ${p.identity}] 1. STT 완료: "${sourceText}"`);
 
-      // ✅ BUG-3 수정: 자막을 WebSocket으로 클라이언트에 전송
-      aiSession.on('transcript', (data) => {
-        console.log(`[Transcript ${p.identity}] ${data.type}: ${data.text}`);
-        
-        if (this.onSubtitle && data.text) {
+        // 1️⃣ 원문 자막 전송
+        if (this.onSubtitle) {
           this.onSubtitle({
             speaker: p.name,
             speakerIdentity: p.identity,
-            text: data.text,
-            transcriptType: data.type, // 'source' 또는 'translation'
-            lang: data.type === 'source' ? lang : targetLang,
+            text: sourceText,
+            transcriptType: 'source',
+            lang: lang,
             timestamp: Date.now(),
           });
         }
+
+        // 2️⃣ GPT-4o-mini로 번역
+        try {
+          const translatedText = await translateText(sourceText, targetLang);
+          console.log(`[Pipeline ${p.identity}] 2. 번역 완료: "${translatedText}"`);
+
+          // 번역 자막 전송
+          if (this.onSubtitle) {
+            this.onSubtitle({
+              speaker: p.name,
+              speakerIdentity: p.identity,
+              text: translatedText,
+              transcriptType: 'translation',
+              lang: targetLang,
+              timestamp: Date.now(),
+            });
+          }
+
+          // 3️⃣ TTS로 음성 합성
+          const pcmAudio = await textToSpeech(translatedText, targetLang);
+          console.log(`[Pipeline ${p.identity}] 3. TTS 완료: ${pcmAudio.length} bytes`);
+
+          // 4️⃣ 음성 출력 (LiveKit으로 전송)
+          for (const [targetIdentity, targetData] of this.participants.entries()) {
+            if (this.mode === 'solo' || targetIdentity !== p.identity) {
+              this.bridge.pushAudio(targetIdentity, pcmAudio);
+            }
+          }
+          console.log(`[Pipeline ${p.identity}] 4. ✅ 음성 전송 완료`);
+
+        } catch (err) {
+          console.error(`[Pipeline ${p.identity}] ❌ 번역/TTS 실패:`, err.message);
+        }
       });
 
-      // 기존 참가자가 있으면 서로의 타겟 언어를 업데이트
+      // 참가자 쌍 업데이트
       if (this.participants.size === 2) {
         this._updateCrossLanguages();
       }
     });
 
-    // ✅ LiveKit 오디오 수신 -> 내 담당 OpenAI 세션에 전송
+    // ──── 오디오 수신 → STT 세션에 전달 ────
     this.bridge.on('audio_received', ({ identity, pcmData }) => {
       const pData = this.participants.get(identity);
       if (pData && pData.aiSession && pData.aiSession.isConnected) {
@@ -133,7 +138,7 @@ export class RoomManager {
       }
     });
 
-    // 참가자 퇴장 시 정리
+    // ──── 참가자 퇴장 ────
     this.bridge.on('participant_disconnected', ({ identity }) => {
       console.log(`[Room ${this.roomId}] Participant disconnected: ${identity}`);
       const pData = this.participants.get(identity);
@@ -144,9 +149,6 @@ export class RoomManager {
     });
   }
 
-  /**
-   * 두 참가자가 모두 접속하면 서로의 언어 쌍을 교차 업데이트
-   */
   _updateCrossLanguages() {
     const entries = [...this.participants.entries()];
     if (entries.length !== 2) return;
@@ -154,26 +156,20 @@ export class RoomManager {
     const [idA, dataA] = entries[0];
     const [idB, dataB] = entries[1];
 
-    // A의 targetLang이 B의 lang이어야 하고, 그 역도 마찬가지
     if (dataA.targetLang !== dataB.lang) {
-      console.log(`[Room ${this.roomId}] Updating cross-languages: ${dataA.lang}<->${dataB.lang}`);
-      // 세션을 재생성할 필요까지는 없고 로그만 남김 (이미 올바르게 설정되었을 가능성이 높음)
+      console.log(`[Room ${this.roomId}] Cross-languages: ${dataA.lang}<->${dataB.lang}`);
     }
   }
 
   async stop() {
     this.isStarted = false;
     
-    // 모든 OpenAI 세션 종료
     for (const p of this.participants.values()) {
-      if (p.aiSession) {
-        p.aiSession.disconnect();
-      }
+      if (p.aiSession) p.aiSession.disconnect();
     }
     this.participants.clear();
     this.pendingLanguages.clear();
 
-    // LiveKit 연결 해제
     try {
       await this.bridge.disconnect();
     } catch (err) {
