@@ -158,12 +158,16 @@ export class OpenAISession extends EventEmitter {
     const event = JSON.parse(data.toString());
 
     switch (event.type) {
-      // 번역된 오디오 스트림
+      // 오디오 스트리밍
       case 'session.output_audio.delta':
-      case 'response.audio.delta':
+      case 'response.output_audio.delta':
         if (event.delta) {
           this.emit('audio_delta', Buffer.from(event.delta, 'base64'));
         }
+        break;
+
+      case 'response.audio.done':
+        this.emit('audio_done');
         break;
 
       // 원문 전사 (내가 말한 것)
