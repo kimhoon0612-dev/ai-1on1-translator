@@ -11,6 +11,20 @@ process.on('unhandledRejection', (reason, promise) => {
 // 환경변수 로드
 import 'dotenv/config';
 import Fastify from 'fastify';
+
+const debugLogs = [];
+const originalLog = console.log;
+const originalError = console.error;
+console.log = (...args) => {
+  debugLogs.push(`[LOG] ${new Date().toISOString()} ` + args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' '));
+  if (debugLogs.length > 200) debugLogs.shift();
+  originalLog(...args);
+};
+console.error = (...args) => {
+  debugLogs.push(`[ERR] ${new Date().toISOString()} ` + args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' '));
+  if (debugLogs.length > 200) debugLogs.shift();
+  originalError(...args);
+};
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import websocket from '@fastify/websocket';
@@ -239,6 +253,8 @@ setInterval(() => {
 }, 5 * 60 * 1000);
 
 app.get('/health', async () => ({ status: 'ok', activeRooms: activeRooms.size }));
+
+app.get('/api/debug-logs', async () => ({ logs: debugLogs }));
 
 // ──── API 및 WebSocket을 제외한 모든 요청을 프론트엔드 React로 넘기기 ────
 // SPA(Single Page Application) 라우팅 지원용
