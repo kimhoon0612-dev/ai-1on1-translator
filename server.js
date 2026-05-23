@@ -38,7 +38,7 @@ await app.register(cors, {
 
 // ──── 보안: 레이트 리밋 ────
 await app.register(rateLimit, {
-  max: 10,
+  max: 500,
   timeWindow: '1 minute',
 });
 
