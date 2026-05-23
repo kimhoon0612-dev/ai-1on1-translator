@@ -109,21 +109,39 @@ export class OpenAISession extends EventEmitter {
    * gpt-realtime-translate 세션 설정
    */
   _initializeSession(ws) {
-    // 언어 코드 → 전체 이름 매핑 (OpenAI가 더 잘 이해)
+    // 언어 코드 → 전체 이름 매핑
     const langNames = {
       ko: 'Korean', en: 'English', ja: 'Japanese', zh: 'Chinese',
       es: 'Spanish', fr: 'French', de: 'German', vi: 'Vietnamese',
       th: 'Thai', id: 'Indonesian', ru: 'Russian', pt: 'Portuguese',
     };
+    // 각 언어로 작성된 "나는 통역사" 프롬프트 (해당 언어로 모델을 강제 전환)
+    const nativePrompts = {
+      ko: `당신은 전문 실시간 통역사입니다. 들리는 모든 음성을 반드시 한국어로 번역하세요. 절대 영어나 다른 언어로 답하지 마세요. 원문을 반복하지 말고, 자연스러운 한국어 번역만 말하세요. 부가 설명이나 코멘트 없이 오직 번역만 하세요.`,
+      en: `You are a professional real-time interpreter. Translate everything you hear into English. Never respond in any other language. Only output the natural English translation, nothing else.`,
+      ja: `あなたはプロの同時通訳者です。聞こえるすべての音声を必ず日本語に翻訳してください。他の言語で答えないでください。自然な日本語の翻訳のみを出力してください。`,
+      zh: `你是一名专业的实时翻译。请将你听到的所有内容翻译成中文。不要用其他语言回答。只输出自然的中文翻译。`,
+      es: `Eres un intérprete profesional en tiempo real. Traduce todo lo que escuches al español. Nunca respondas en otro idioma. Solo produce la traducción natural al español.`,
+      fr: `Vous êtes un interprète professionnel en temps réel. Traduisez tout ce que vous entendez en français. Ne répondez jamais dans une autre langue. Produisez uniquement la traduction naturelle en français.`,
+      de: `Sie sind ein professioneller Echtzeit-Dolmetscher. Übersetzen Sie alles, was Sie hören, ins Deutsche. Antworten Sie niemals in einer anderen Sprache. Geben Sie nur die natürliche deutsche Übersetzung aus.`,
+      vi: `Bạn là phiên dịch viên chuyên nghiệp. Hãy dịch mọi thứ bạn nghe được sang tiếng Việt. Không bao giờ trả lời bằng ngôn ngữ khác. Chỉ đưa ra bản dịch tiếng Việt tự nhiên.`,
+      th: `คุณเป็นล่ามมืออาชีพแบบเรียลไทม์ แปลทุกอย่างที่คุณได้ยินเป็นภาษาไทย อย่าตอบเป็นภาษาอื่น ให้แปลเป็นภาษาไทยที่เป็นธรรมชาติเท่านั้น`,
+      id: `Anda adalah penerjemah profesional secara real-time. Terjemahkan semua yang Anda dengar ke dalam bahasa Indonesia. Jangan pernah menjawab dalam bahasa lain. Hanya keluarkan terjemahan bahasa Indonesia yang alami.`,
+      ru: `Вы профессиональный синхронный переводчик. Переводите всё, что слышите, на русский язык. Никогда не отвечайте на другом языке. Выводите только естественный перевод на русский.`,
+      pt: `Você é um intérprete profissional em tempo real. Traduza tudo o que ouvir para português. Nunca responda em outro idioma. Produza apenas a tradução natural em português.`,
+    };
+
     const targetName = langNames[this.targetLang] || this.targetLang;
     const sourceName = langNames[this.sourceLang] || this.sourceLang;
 
     let instructions = '';
     if (this.mode === 'face2face') {
       const otherName = langNames[this.face2faceOtherLang] || this.face2faceOtherLang;
-      instructions = `You are a professional real-time interpreter. You will hear two languages: ${sourceName} and ${otherName}. When you hear ${sourceName}, translate it into ${otherName}. When you hear ${otherName}, translate it into ${sourceName}. IMPORTANT: You must ONLY output the translation. Never repeat the original. Never add commentary. Just translate.`;
+      instructions = `You are a professional real-time interpreter. You will hear two languages: ${sourceName} and ${otherName}. When you hear ${sourceName}, translate it into ${otherName}. When you hear ${otherName}, translate it into ${sourceName}. ONLY output the translation. Never repeat the original.`;
     } else {
-      instructions = `You are a professional real-time interpreter. Your ONLY job is to translate everything you hear into ${targetName}. CRITICAL RULES: 1) ALWAYS respond in ${targetName}, no exceptions. 2) If the audio is already in ${targetName}, still repeat it in ${targetName}. 3) Never respond in the source language. 4) Never add commentary or filler. 5) Just translate accurately and naturally into ${targetName}.`;
+      // ✅ 핵심: 타겟 언어 자체로 작성된 프롬프트 사용 (모델을 해당 언어 모드로 강제)
+      instructions = nativePrompts[this.targetLang] || 
+        `You are a professional real-time interpreter. Translate everything you hear into ${targetName}. ALWAYS respond in ${targetName} only. Never respond in the source language.`;
     }
 
     const event = {
