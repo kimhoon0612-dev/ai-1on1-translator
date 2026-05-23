@@ -1,3 +1,14 @@
+import process from 'process';
+
+// 전역 에러 핸들러 추가 (서버 크래시 방지)
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err);
+});
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+// 환경변수 로드
 import 'dotenv/config';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
