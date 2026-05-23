@@ -177,7 +177,7 @@ export class OpenAISession extends EventEmitter {
 
       // 번역 자막
       case 'session.output_transcript.done':
-      case 'response.audio_transcript.done':
+      case 'response.output_audio_transcript.done':
         if (event.transcript?.trim()) {
           this.emit('transcript', { type: 'translation', text: event.transcript.trim() });
         }
@@ -185,7 +185,7 @@ export class OpenAISession extends EventEmitter {
 
       // 번역 자막 스트리밍 (완성 이벤트가 없을 경우를 대비해 델타를 모아서 처리)
       case 'session.output_transcript.delta':
-      case 'response.audio_transcript.delta':
+      case 'response.output_audio_transcript.delta':
         if (event.delta) {
           if (!this._transcriptBuffer) this._transcriptBuffer = '';
           this._transcriptBuffer += event.delta;
