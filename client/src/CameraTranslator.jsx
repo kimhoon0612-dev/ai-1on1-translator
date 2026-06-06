@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { apiFetch } from './utils/api';
 
 export default function CameraTranslator() {
   const navigate = useNavigate();
@@ -8,6 +9,7 @@ export default function CameraTranslator() {
   
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
+  const streamRef = useRef(null);
   const [stream, setStream] = useState(null);
   const [capturedImage, setCapturedImage] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -20,6 +22,7 @@ export default function CameraTranslator() {
       const mediaStream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: 'environment' } // 후면 카메라 우선
       });
+      streamRef.current = mediaStream;
       setStream(mediaStream);
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream;
@@ -34,9 +37,10 @@ export default function CameraTranslator() {
   useEffect(() => {
     startCamera();
     return () => {
-      // 언마운트 시 카메라 끄기
-      if (stream) {
-        stream.getTracks().forEach(t => t.stop());
+      // Fix 4: Use ref to avoid stale closure
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(t => t.stop());
+        streamRef.current = null;
       }
     };
   }, []);
@@ -72,14 +76,10 @@ export default function CameraTranslator() {
     setError('');
     
     try {
-      const res = await fetch('/api/translate-image', {
+      const data = await apiFetch('/api/translate-image', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ image: capturedImage, targetLang })
       });
-      
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || '번역 실패');
       
       setResult(data.result);
     } catch (err) {

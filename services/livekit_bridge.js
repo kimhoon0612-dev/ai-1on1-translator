@@ -55,6 +55,23 @@ export class LiveKitBridge extends EventEmitter {
       console.log(`[Bridge ${this.roomId}] 🔴 Disconnected`);
       this.isConnected = false;
       this.emit('disconnected');
+      
+      // Auto-reconnect
+      let retries = 0;
+      const connect = async () => {
+        try {
+          await this.room.connect(LIVEKIT_URL, token);
+          this.isConnected = true;
+          console.log(`[Bridge ${this.roomId}] 🟢 Reconnected to LiveKit`);
+          this.emit('reconnected');
+        } catch (err) {
+          retries++;
+          if (retries < 10) {
+            setTimeout(connect, Math.min(1000 * Math.pow(2, retries), 30000));
+          }
+        }
+      };
+      setTimeout(connect, 2000);
     });
 
     this.room.on(RoomEvent.ParticipantDisconnected, (participant) => {
@@ -128,10 +145,10 @@ export class LiveKitBridge extends EventEmitter {
       const trackName = `trans_for_${targetIdentity}`;
       const track = LocalAudioTrack.createAudioTrack(trackName, source);
       
-      await this.room.localParticipant.publishTrack(track, {
+      const publication = await this.room.localParticipant.publishTrack(track, {
         source: TrackSource.SOURCE_MICROPHONE,
       });
-      this.outboundTracks.set(targetIdentity, { source, track });
+      this.outboundTracks.set(targetIdentity, { source, track, sid: publication.sid });
       console.log(`[Bridge ${this.roomId}] 📤 Outbound track created for ${targetIdentity}`);
     } catch (err) {
       console.error(`[Bridge ${this.roomId}] ❌ Outbound track 생성 실패:`, err);
@@ -166,7 +183,9 @@ export class LiveKitBridge extends EventEmitter {
     
     for (const [id, outbound] of this.outboundTracks) {
       try {
-        await this.room.localParticipant.unpublishTrack(outbound.track);
+        if (outbound.sid) {
+          await this.room.localParticipant.unpublishTrack(outbound.sid);
+        }
       } catch (err) { /* 무시 */ }
     }
     this.outboundTracks.clear();

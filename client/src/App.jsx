@@ -1,6 +1,16 @@
 import { Routes, Route, useNavigate, useParams } from 'react-router-dom';
 import { useState } from 'react';
 import CallRoom from './CallRoom';
+import LoginPage from './pages/LoginPage';
+import MyPage from './pages/MyPage';
+import HistoryPage from './pages/HistoryPage';
+import PricingPage from './pages/PricingPage';
+import AdminPage from './pages/AdminPage';
+import TermsPage from './pages/TermsPage';
+import PrivacyPage from './pages/PrivacyPage';
+import ProtectedRoute from './components/ProtectedRoute';
+import { useAuth } from './contexts/AuthContext';
+import { apiFetch } from './utils/api';
 
 // 지원 언어 목록
 const LANGUAGES = [
@@ -27,17 +37,21 @@ function Home() {
   const [otherLanguage, setOtherLanguage] = useState('en');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const { user, logout } = useAuth();
+
+  // 사용자 이름 초기값
+  useState(() => {
+    if (user?.name && !name) setName(user.name);
+  });
 
   const createRoom = async (mode = '1on1') => {
     if (!name.trim()) return alert('이름을 입력해주세요.');
     setLoading(true);
     try {
-      const res = await fetch('/api/room/create', { 
+      const data = await apiFetch('/api/room/create', { 
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mode, otherLang: otherLanguage })
       });
-      const data = await res.json();
       navigate(`/call/${data.roomId}?name=${encodeURIComponent(name)}&lang=${language}&otherLang=${otherLanguage}&mode=${mode}`);
     } catch (err) {
       alert('방 생성에 실패했습니다. 서버가 실행 중인지 확인하세요.');
@@ -48,6 +62,39 @@ function Home() {
   return (
     <div className="home-container">
       <div className="card">
+        {/* 사용자 정보 + 네비게이션 */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+          <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+            👋 {user?.name || 'Guest'}
+            <span style={{
+              marginLeft: '0.5rem', padding: '0.15rem 0.5rem', borderRadius: '999px',
+              fontSize: '0.7rem', fontWeight: 600, textTransform: 'uppercase',
+              background: user?.plan === 'pro' ? 'rgba(139,92,246,0.2)' : user?.plan === 'basic' ? 'rgba(59,130,246,0.2)' : 'rgba(100,116,139,0.2)',
+              color: user?.plan === 'pro' ? '#a78bfa' : user?.plan === 'basic' ? '#60a5fa' : '#94a3b8',
+            }}>
+              {user?.plan || 'free'}
+            </span>
+            {user?.credits !== undefined && (
+              <span style={{ marginLeft: '0.5rem', color: 'var(--accent-emerald)', fontSize: '0.8rem' }}>
+                ⏳ {user.credits}분
+              </span>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: '0.3rem' }}>
+            <button onClick={() => navigate('/mypage')} style={{ background: 'none', border: '1px solid var(--border-glass)', color: 'var(--text-muted)', padding: '0.3rem 0.6rem', borderRadius: '8px', cursor: 'pointer', fontSize: '0.75rem', fontFamily: 'inherit' }}>
+              👤 MY
+            </button>
+            {user?.role === 'admin' && (
+              <button onClick={() => navigate('/admin')} style={{ background: 'none', border: '1px solid rgba(139,92,246,0.3)', color: '#a78bfa', padding: '0.3rem 0.6rem', borderRadius: '8px', cursor: 'pointer', fontSize: '0.75rem', fontFamily: 'inherit' }}>
+                ⚙️ 관리
+              </button>
+            )}
+            <button onClick={logout} style={{ background: 'none', border: '1px solid var(--border-glass)', color: 'var(--text-muted)', padding: '0.3rem 0.6rem', borderRadius: '8px', cursor: 'pointer', fontSize: '0.75rem', fontFamily: 'inherit' }}>
+              로그아웃
+            </button>
+          </div>
+        </div>
+
         <div className="card-icon">🌐</div>
         <h1>AI 1:1 통역 전화</h1>
         <p>상대방과 실시간으로 양방향 통역 대화를 나눠보세요.</p>
@@ -166,10 +213,17 @@ import CameraTranslator from './CameraTranslator';
 export default function App() {
   return (
     <Routes>
-      <Route path="/" element={<Home />} />
+      <Route path="/login" element={<LoginPage />} />
+      <Route path="/" element={<ProtectedRoute><Home /></ProtectedRoute>} />
       <Route path="/join/:roomId" element={<JoinRoom />} />
-      <Route path="/call/:roomId" element={<CallRoom />} />
-      <Route path="/camera" element={<CameraTranslator />} />
+      <Route path="/call/:roomId" element={<ProtectedRoute><CallRoom /></ProtectedRoute>} />
+      <Route path="/camera" element={<ProtectedRoute><CameraTranslator /></ProtectedRoute>} />
+      <Route path="/mypage" element={<ProtectedRoute><MyPage /></ProtectedRoute>} />
+      <Route path="/history" element={<ProtectedRoute><HistoryPage /></ProtectedRoute>} />
+      <Route path="/pricing" element={<ProtectedRoute><PricingPage /></ProtectedRoute>} />
+      <Route path="/admin" element={<ProtectedRoute><AdminPage /></ProtectedRoute>} />
+      <Route path="/terms" element={<TermsPage />} />
+      <Route path="/privacy" element={<PrivacyPage />} />
     </Routes>
   );
 }

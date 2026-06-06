@@ -2,9 +2,10 @@ services:
   - type: web
     name: ai-1on1-translator
     env: node
-    plan: free
+    plan: starter
     buildCommand: npm install && npm run build
     startCommand: npm start
+    healthCheckPath: /health
     envVars:
       - key: LIVEKIT_API_KEY
         sync: false
@@ -14,5 +15,34 @@ services:
         sync: false
       - key: OPENAI_API_KEY
         sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: DATABASE_URL
+        fromDatabase:
+          name: translator-db
+          property: connectionString
+      - key: NODE_ENV
+        value: "production"
       - key: PORT
         value: "3001"
+      # 소셜 로그인 (선택)
+      - key: KAKAO_CLIENT_ID
+        sync: false
+      - key: KAKAO_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      # 결제 (선택)
+      - key: PORTONE_API_SECRET
+        sync: false
+      # 모니터링 (선택)
+      - key: SENTRY_DSN
+        sync: false
+
+databases:
+  - name: translator-db
+    plan: free
+    databaseName: translator
+    user: translator_user

@@ -7,6 +7,7 @@ import {
 } from '@livekit/components-react';
 import '@livekit/components-styles';
 import { QRCodeSVG } from 'qrcode.react';
+import { apiFetch } from './utils/api';
 
 export default function CallRoom() {
   const { roomId } = useParams();
@@ -23,6 +24,7 @@ export default function CallRoom() {
   const [error, setError] = useState('');
   const [subtitles, setSubtitles] = useState([]);
   const [speakerMuted, setSpeakerMuted] = useState(false);
+  const [micMuted, setMicMuted] = useState(false);
   const [connected, setConnected] = useState(false);
   const [micAllowed, setMicAllowed] = useState(false);
 
@@ -71,16 +73,10 @@ export default function CallRoom() {
 
     const fetchToken = async () => {
       try {
-        const res = await fetch('/api/token', {
+        const data = await apiFetch('/api/token', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ roomId, participantName: name, language }),
         });
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          throw new Error(data.error || '방에 입장할 수 없습니다.');
-        }
-        const data = await res.json();
         if (mountedRef.current) {
           setToken(data.token);
           setServerUrl(data.livekitUrl);
@@ -183,7 +179,7 @@ export default function CallRoom() {
 
   // 통화 종료
   const handleEndCall = async () => {
-    try { await fetch(`/api/room/${roomId}/end`, { method: 'POST' }); } catch (e) {}
+    try { await apiFetch(`/api/room/${roomId}/end`, { method: 'POST' }); } catch (e) {}
     if (wsRef.current) wsRef.current.close(1000, 'Call ended');
     navigate('/');
   };
@@ -231,7 +227,7 @@ export default function CallRoom() {
       token={token}
       serverUrl={serverUrl}
       data-lk-theme="default"
-      style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: '#0f172a' }}
+      style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: 'transparent' }}
       onError={(err) => console.error('[LiveKit] Error:', err)}
       onConnected={() => console.log('[LiveKit] ✅ Room 연결 완료')}
       onDisconnected={() => console.log('[LiveKit] Room 연결 해제')}
@@ -297,6 +293,22 @@ export default function CallRoom() {
 
       <div className="call-controls">
         <RoomAudioRenderer />
+        <AudioController muted={speakerMuted} />
+        <MicController muted={micMuted} />
+        <button
+          className={`btn ${micMuted ? 'warning' : 'secondary'} mic-btn`}
+          onClick={() => setMicMuted(!micMuted)}
+          title={micMuted ? '마이크 켜기' : '마이크 끄기'}
+        >
+          {micMuted ? '🎤❌ 마이크 꺼짐' : '🎤 마이크 켜짐'}
+        </button>
+        <button
+          className={`btn ${speakerMuted ? 'warning' : 'secondary'} speaker-btn`}
+          onClick={() => setSpeakerMuted(!speakerMuted)}
+          title={speakerMuted ? '스피커 켜기' : '스피커 끄기'}
+        >
+          {speakerMuted ? '🔇 스피커 꺼짐' : '🔊 스피커 켜짐'}
+        </button>
         <button className="btn danger end-call-btn" onClick={handleEndCall}>
           📵 {isSolo ? '듣기 종료' : '통화 종료'}
         </button>
@@ -322,6 +334,19 @@ function AudioController({ muted }) {
         }
       }
     }
+  }, [room, muted]);
+
+  return null;
+}
+
+function MicController({ muted }) {
+  const room = useRoomContext();
+
+  useEffect(() => {
+    if (!room?.localParticipant) return;
+    room.localParticipant.setMicrophoneEnabled(!muted).catch(err => {
+      console.error('[Mic] 마이크 토글 실패:', err.message);
+    });
   }, [room, muted]);
 
   return null;

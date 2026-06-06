@@ -44,16 +44,20 @@ export class RoomManager {
       
       const lang = this._resolveLanguage(p.name);
       
+      let sourceLang = lang;
       let targetLang;
       if (this.mode === 'solo') {
-        targetLang = lang;
+        // 혼자 듣기(Solo) 모드에서는 사용자가 선택한 언어가 "내가 보고 듣고 싶은 언어(타겟)"가 됩니다.
+        // 예를 들어 '한국어'를 선택했다면, 유튜브(입력)는 '영어'로 간주하고 '한국어'로 번역합니다.
+        targetLang = sourceLang;
+        sourceLang = (targetLang === 'ko') ? 'en' : 'ko';
       } else {
         const otherLang = this._getOtherParticipantLang(p.identity);
-        targetLang = otherLang || (lang === 'ko' ? 'en' : 'ko');
+        targetLang = otherLang || (sourceLang === 'ko' ? 'en' : 'ko');
       }
 
       // ✅ OpenAI Realtime API — STT(음성인식) 전용
-      const aiSession = new OpenAISession(lang, targetLang, this.mode, this.face2faceOtherLang);
+      const aiSession = new OpenAISession(sourceLang, targetLang, this.mode, this.face2faceOtherLang);
       
       try {
         await aiSession.connect();
@@ -85,7 +89,8 @@ export class RoomManager {
             speakerIdentity: p.identity,
             text: sourceText,
             transcriptType: 'source',
-            lang: lang,
+            lang: sourceLang,
+            forIdentity: p.identity,
             timestamp: Date.now(),
           });
         }
@@ -95,16 +100,25 @@ export class RoomManager {
           const translatedText = await translateText(sourceText, targetLang);
           console.log(`[Pipeline ${p.identity}] 2. 번역 완료: "${translatedText}"`);
 
-          // 번역 자막 전송
+          // 번역 자막 전송 — 상대방에게만 전달되도록 forIdentity 설정
+          const targetIdentities = [];
+          for (const [tid] of this.participants.entries()) {
+            if (this.mode === 'solo' || tid !== p.identity) {
+              targetIdentities.push(tid);
+            }
+          }
           if (this.onSubtitle) {
-            this.onSubtitle({
-              speaker: p.name,
-              speakerIdentity: p.identity,
-              text: translatedText,
-              transcriptType: 'translation',
-              lang: targetLang,
-              timestamp: Date.now(),
-            });
+            for (const tid of targetIdentities) {
+              this.onSubtitle({
+                speaker: p.name,
+                speakerIdentity: p.identity,
+                text: translatedText,
+                transcriptType: 'translation',
+                lang: targetLang,
+                forIdentity: tid,
+                timestamp: Date.now(),
+              });
+            }
           }
 
           // 3️⃣ TTS로 음성 합성
@@ -112,10 +126,9 @@ export class RoomManager {
           console.log(`[Pipeline ${p.identity}] 3. TTS 완료: ${pcmAudio.length} bytes`);
 
           // 4️⃣ 음성 출력 (LiveKit으로 전송)
-          for (const [targetIdentity, targetData] of this.participants.entries()) {
-            if (this.mode === 'solo' || targetIdentity !== p.identity) {
-              this.bridge.pushAudio(targetIdentity, pcmAudio);
-            }
+          // Fix 3: Only push audio to intended recipients
+          for (const tid of targetIdentities) {
+            this.bridge.pushAudio(tid, pcmAudio);
           }
           console.log(`[Pipeline ${p.identity}] 4. ✅ 음성 전송 완료`);
 
@@ -156,8 +169,22 @@ export class RoomManager {
     const [idA, dataA] = entries[0];
     const [idB, dataB] = entries[1];
 
+    // Fix 10: Actually update targetLang for each participant
+    let changed = false;
+
     if (dataA.targetLang !== dataB.lang) {
-      console.log(`[Room ${this.roomId}] Cross-languages: ${dataA.lang}<->${dataB.lang}`);
+      console.log(`[Room ${this.roomId}] Updating ${idA}: targetLang ${dataA.targetLang} → ${dataB.lang}`);
+      dataA.targetLang = dataB.lang;
+      changed = true;
+    }
+    if (dataB.targetLang !== dataA.lang) {
+      console.log(`[Room ${this.roomId}] Updating ${idB}: targetLang ${dataB.targetLang} → ${dataA.lang}`);
+      dataB.targetLang = dataA.lang;
+      changed = true;
+    }
+
+    if (changed) {
+      console.log(`[Room ${this.roomId}] Cross-languages updated: ${dataA.lang}<->${dataB.lang}`);
     }
   }
 

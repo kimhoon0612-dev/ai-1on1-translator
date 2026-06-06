@@ -30,14 +30,24 @@ export class OpenAISession extends EventEmitter {
 
     this.ws = await this._createWebSocket(apiKey);
     this.isConnected = true;
+    this._audioAppended = false;
+    
+    // VAD (음량 에너지 기반 보정) 상태 초기화
+    this._vadState = 'SILENCE'; // 'SILENCE' | 'SPEECH'
+    this._audioHistory = []; // { chunk, rms } 큐
+    this._speechStartTime = 0;
+    this._consecutiveSilenceMs = 0;
+
     this._startSwapTimer();
   }
 
   _createWebSocket(apiKey) {
-    const url = "wss://api.openai.com/v1/realtime?model=gpt-realtime";
+    const url = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview";
     
     const ws = new WebSocket(url, {
-      headers: { "Authorization": `Bearer ${apiKey}` },
+      headers: {
+        "Authorization": `Bearer ${apiKey}`
+      },
     });
 
     return new Promise((resolve, reject) => {
@@ -70,8 +80,33 @@ export class OpenAISession extends EventEmitter {
         this.isConnected = false;
         console.log(`OpenAI WS closed: code=${code}`);
         this.emit('disconnected', { code });
+        if (code !== 1000 && !this._swapping) {
+          this._attemptReconnect();
+        }
       });
     });
+  }
+
+  async _attemptReconnect() {
+    let retries = 0;
+    const maxRetries = 5;
+    const connect = async () => {
+      try {
+        await this.connect();
+        console.log(`[OpenAI] Reconnected successfully.`);
+        this.emit('reconnected');
+      } catch (err) {
+        retries++;
+        if (retries >= maxRetries) {
+          console.error(`[OpenAI] Reconnect failed after ${maxRetries} attempts.`);
+          return;
+        }
+        const delay = 1000 * Math.pow(2, retries - 1);
+        console.log(`[OpenAI] Reconnecting in ${delay}ms...`);
+        setTimeout(connect, delay);
+      }
+    };
+    setTimeout(connect, 1000);
   }
 
   async _hotSwap() {
@@ -96,55 +131,163 @@ export class OpenAISession extends EventEmitter {
   }
 
   _startSwapTimer() {
-    if (this._swapTimer) clearTimeout(this._swapTimer);
-    this._swapTimer = setTimeout(() => this._hotSwap(), HOT_SWAP_INTERVAL_MS);
+    if (this._swapTimer) {
+      clearTimeout(this._swapTimer);
+    }
+    this._swapTimer = setTimeout(() => {
+      this._hotSwap();
+    }, HOT_SWAP_INTERVAL_MS);
+    console.log(`[HotSwap] 다음 STT 세션 교체 예정: ${HOT_SWAP_INTERVAL_MS / 1000 / 60}분 후`);
+  }
+
+  _send(event) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(event));
+    }
+  }
+
+  _calculateRMS(pcmBuffer) {
+    let sumSquares = 0;
+    const numSamples = pcmBuffer.length / 2;
+    for (let i = 0; i < numSamples; i++) {
+      const sample = pcmBuffer.readInt16LE(i * 2);
+      sumSquares += sample * sample;
+    }
+    return Math.sqrt(sumSquares / numSamples);
   }
 
   /**
    * ✅ 세션 설정 — STT(음성인식) 전용
    * 모델 응답은 무시하고, 입력 오디오 전사(transcription)만 활용
+   * [개선] 환각(Hallucination) 방지를 위해 instructions 대폭 보강
    */
   _initializeSession(ws) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+    const langMap = {
+      'ko': 'Korean',
+      'en': 'English',
+      'ja': 'Japanese',
+      'zh': 'Chinese',
+      'es': 'Spanish',
+      'fr': 'French'
+    };
+    const fullLangName = langMap[this.sourceLang] || this.sourceLang;
+
     const event = {
       type: "session.update",
       session: {
-        type: "realtime",  // ✅ 필수 파라미터!
-        // 텍스트 모달리티만 사용 (오디오 응답 생성 차단 → 비용 절감)
-        modalities: ["text"],
-        // 최소한의 지시 (실제 번역은 GPT-4o-mini에서 처리)
-        instructions: "Listen and transcribe. Do not respond or translate.",
-        audio: {
-          input: {
-            transcription: {
-              model: "whisper-1"
-            },
-            turn_detection: {
-              type: "server_vad",
-              silence_duration_ms: 300,   // 0.3초 무음이면 바로 전사
-              threshold: 0.5,
-              prefix_padding_ms: 300,
-            }
-          }
-        }
-      }
+        type: "realtime",
+        instructions: `You are a strict, high-precision Speech-to-Text assistant. The user is speaking in ${fullLangName}. Your ONLY job is to transcribe the exact words the user speaks in ${fullLangName}.
+CRITICAL RULES:
+1. Do NOT translate or summarize. Output the transcript in ${fullLangName} exactly as spoken.
+2. Do NOT respond to the user, comment, explain, or add notes. Output ONLY the transcribed text.
+3. Do NOT hallucinate or guess if there is silence, hum, noise, or music. If the audio lacks clear speech, output absolutely nothing (empty string).
+4. Do NOT output generic phrases like "Thank you", "Thank you for watching", "구독", "좋아요", "you", "oh" unless they are explicitly and clearly spoken.
+5. If the voice is cut off mid-word, transcribe only the clearly spoken complete words.`,
+      },
     };
+
     ws.send(JSON.stringify(event));
-    console.log(`[OpenAI] STT Session configured (transcription only)`);
+    console.log(`[OpenAI] STT Session configured (transcribing in ${fullLangName})`);
   }
 
   /**
    * PCM 오디오 전송 (base64)
+   * [개선] 백그라운드 노이즈/침묵 필터링 및 지능적 VAD(침묵 시간 기준 Commit) 처리
    */
   sendAudio(pcmBuffer) {
     if (!this.isConnected || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-    
+
     try {
-      this.ws.send(JSON.stringify({
-        type: "input_audio_buffer.append",
-        audio: pcmBuffer.toString('base64'),
-      }));
+      const rms = this._calculateRMS(pcmBuffer);
+      const chunkDurationMs = pcmBuffer.length / 48; // 24kHz Mono 16-bit PCM: 48 bytes/ms
+      
+      const PRE_ROLL_CHUNKS = 5; // 약 100ms 전치 버퍼
+      const RMS_THRESHOLD = parseInt(process.env.VAD_RMS_THRESHOLD || '400', 10);
+      const SPEECH_ONSET_CHUNKS = 2; // 연속으로 이 개수만큼 음성이 인식되면 발화 시작으로 판단
+
+      const SILENCE_TIMEOUT_1ON1 = 800;  // 1:1 대화 모드 침묵 역치
+      const SILENCE_TIMEOUT_SOLO = 1000; // 혼자듣기 모드 침묵 역치
+      const MINI_SILENCE_TIMEOUT = 300;  // 목표 시간이 지난 후 미세 침묵 시 문장 분할용
+      const TARGET_SPEECH_DURATION = 5000; // 유튜브 연속 발화 시 5초 시점에 미세 침묵으로 자연스럽게 끊음
+      const MAX_SPEECH_DURATION = 8000;   // 최대 발화 길이를 8초로 늘려 어절이 도중에 잘리지 않도록 함
+
+      this._audioHistory.push({ chunk: pcmBuffer, rms });
+      if (this._audioHistory.length > PRE_ROLL_CHUNKS) {
+        this._audioHistory.shift();
+      }
+
+      if (this._vadState === 'SILENCE') {
+        // 침묵 상태: 최근 수신된 프레임들이 임계값을 넘었는지 확인
+        const onsetChunks = this._audioHistory.slice(-SPEECH_ONSET_CHUNKS);
+        const isOnset = onsetChunks.length >= SPEECH_ONSET_CHUNKS && 
+                        onsetChunks.every(item => item.rms > RMS_THRESHOLD);
+
+        if (isOnset) {
+          this._vadState = 'SPEECH';
+          this._speechStartTime = Date.now();
+          this._consecutiveSilenceMs = 0;
+          this._audioAppended = true;
+
+          // 노이즈 방지를 위해 세션 인풋 버퍼 초기화 후 전송 시작
+          this._send({ type: 'input_audio_buffer.clear' });
+
+          // 말하기 직전 100ms 가량의 pre-roll 프레임을 함께 보내 어절 첫 부분이 잘리지 않게 방지
+          for (const item of this._audioHistory) {
+            this._send({
+              type: "input_audio_buffer.append",
+              audio: item.chunk.toString('base64'),
+            });
+          }
+        }
+      } else if (this._vadState === 'SPEECH') {
+        // 발화 상태: 계속 오디오 추가
+        this._send({
+          type: "input_audio_buffer.append",
+          audio: pcmBuffer.toString('base64'),
+        });
+
+        if (rms < RMS_THRESHOLD) {
+          this._consecutiveSilenceMs += chunkDurationMs;
+        } else {
+          this._consecutiveSilenceMs = 0;
+        }
+
+        const speechDuration = Date.now() - this._speechStartTime;
+        const silenceTimeout = (this.mode === 'solo') ? SILENCE_TIMEOUT_SOLO : SILENCE_TIMEOUT_1ON1;
+
+        let shouldCommit = false;
+        let commitReason = "";
+
+        if (this._consecutiveSilenceMs >= silenceTimeout) {
+          shouldCommit = true;
+          commitReason = `silence_timeout (${Math.round(this._consecutiveSilenceMs)}ms)`;
+        } else if (speechDuration >= TARGET_SPEECH_DURATION && this._consecutiveSilenceMs >= MINI_SILENCE_TIMEOUT) {
+          shouldCommit = true;
+          commitReason = `target_speech_duration_with_mini_silence (${Math.round(speechDuration)}ms / ${Math.round(this._consecutiveSilenceMs)}ms)`;
+        } else if (speechDuration >= MAX_SPEECH_DURATION) {
+          shouldCommit = true;
+          commitReason = `max_speech_duration (${Math.round(speechDuration)}ms)`;
+        }
+
+        if (shouldCommit) {
+          this._forceCommit();
+          this._vadState = 'SILENCE';
+          this._audioAppended = false;
+          this._speechStartTime = 0;
+          this._consecutiveSilenceMs = 0;
+        }
+      }
     } catch (err) {
       console.error("sendAudio error:", err.message);
+    }
+  }
+
+  _forceCommit() {
+    if (this._audioAppended && this.isConnected && this.ws.readyState === WebSocket.OPEN) {
+      this._send({ type: 'input_audio_buffer.commit' });
+      this._send({ type: 'response.create' });
     }
   }
 
@@ -153,9 +296,7 @@ export class OpenAISession extends EventEmitter {
 
     switch (event.type) {
       // ✅ 핵심: 원문 전사 완료 — 이것만 사용
-      case 'conversation.item.input_audio_transcription.completed':
-      case 'session.input_audio_transcription.completed':
-      case 'session.input_audio_transcription.done':
+      case 'response.output_audio_transcript.done':
         if (event.transcript?.trim()) {
           const text = event.transcript.trim();
           console.log(`[STT] 원문 전사: "${text}"`);
@@ -188,6 +329,11 @@ export class OpenAISession extends EventEmitter {
       clearTimeout(this._swapTimer);
       this._swapTimer = null;
     }
+    this._audioHistory = [];
+    this._vadState = 'SILENCE';
+    this._speechStartTime = 0;
+    this._consecutiveSilenceMs = 0;
+    this._audioAppended = false;
     if (this.ws) {
       try { this.ws.close(1000, 'Session ended'); } catch (e) {}
       this.ws = null;
