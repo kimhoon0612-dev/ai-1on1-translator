@@ -173,24 +173,36 @@ export class OpenAISession extends EventEmitter {
       'es': 'Spanish',
       'fr': 'French'
     };
-    const fullLangName = langMap[this.sourceLang] || this.sourceLang;
 
-    const event = {
-      type: "session.update",
-      session: {
-        type: "realtime",
-        instructions: `You are a strict, high-precision Speech-to-Text assistant. The user is speaking in ${fullLangName}. Your ONLY job is to transcribe the exact words the user speaks in ${fullLangName}.
+    const isAutoDetect = this.sourceLang === 'auto';
+    const fullLangName = isAutoDetect ? 'any language' : (langMap[this.sourceLang] || this.sourceLang);
+
+    const instructions = isAutoDetect
+      ? `You are a strict, high-precision Speech-to-Text assistant. The user's audio may contain speech in ANY language (Korean, English, Japanese, Chinese, Spanish, French, etc). Your ONLY job is to transcribe the exact words spoken, preserving the original language.
+CRITICAL RULES:
+1. Do NOT translate. Output the transcript in the SAME language as spoken.
+2. Do NOT respond, comment, explain, or add notes. Output ONLY the transcribed text.
+3. Do NOT hallucinate if there is silence, noise, or music. Output nothing (empty string).
+4. Do NOT output generic phrases unless explicitly spoken.
+5. Auto-detect the language and transcribe accordingly.`
+      : `You are a strict, high-precision Speech-to-Text assistant. The user is speaking in ${fullLangName}. Your ONLY job is to transcribe the exact words the user speaks in ${fullLangName}.
 CRITICAL RULES:
 1. Do NOT translate or summarize. Output the transcript in ${fullLangName} exactly as spoken.
 2. Do NOT respond to the user, comment, explain, or add notes. Output ONLY the transcribed text.
 3. Do NOT hallucinate or guess if there is silence, hum, noise, or music. If the audio lacks clear speech, output absolutely nothing (empty string).
 4. Do NOT output generic phrases like "Thank you", "Thank you for watching", "구독", "좋아요", "you", "oh" unless they are explicitly and clearly spoken.
-5. If the voice is cut off mid-word, transcribe only the clearly spoken complete words.`,
+5. If the voice is cut off mid-word, transcribe only the clearly spoken complete words.`;
+
+    const event = {
+      type: "session.update",
+      session: {
+        type: "realtime",
+        instructions,
       },
     };
 
     ws.send(JSON.stringify(event));
-    console.log(`[OpenAI] STT Session configured (transcribing in ${fullLangName})`);
+    console.log(`[OpenAI] STT Session configured (${isAutoDetect ? 'auto-detect' : fullLangName})`);
   }
 
   /**

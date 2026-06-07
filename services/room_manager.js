@@ -47,9 +47,10 @@ export class RoomManager {
       let sourceLang = lang;
       let targetLang;
       if (this.mode === 'solo') {
-        // 혼자 듣기(Solo) 모드에서는 사용자가 선택한 언어가 "내가 보고 듣고 싶은 언어(타겟)"가 됩니다.
+        // 혼자 듣기(Solo) 모드: 사용자가 선택한 언어가 "내가 보고 싶은 언어(타겟)"
+        // 소스 언어는 'auto'로 설정하여 어떤 언어든 자동 감지
         targetLang = sourceLang;
-        sourceLang = (targetLang === 'ko') ? 'en' : 'ko';
+        sourceLang = 'auto';
       } else if (this.mode === 'face2face') {
         // 대면 통역(Face2Face) 모드: 한 대의 기기에서 두 언어가 번갈아 사용됨
         // sourceLang = 참가자가 선택한 "내 언어"
