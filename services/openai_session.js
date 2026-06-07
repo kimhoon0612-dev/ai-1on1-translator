@@ -42,7 +42,7 @@ export class OpenAISession extends EventEmitter {
   }
 
   _createWebSocket(apiKey) {
-    const url = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview";
+    const url = "wss://api.openai.com/v1/realtime?model=gpt-realtime-translate";
     
     const ws = new WebSocket(url, {
       headers: {
