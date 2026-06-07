@@ -29,6 +29,8 @@ export default function CallRoom() {
   const [micAllowed, setMicAllowed] = useState(false);
 
   const subtitlesEndRef = useRef(null);
+  const subtitlesContainerRef = useRef(null);
+  const isUserScrollingRef = useRef(false);
   const wsRef = useRef(null);
   const mountedRef = useRef(true); // 컴포넌트 마운트 상태 추적
 
@@ -37,6 +39,29 @@ export default function CallRoom() {
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
   }, []);
+
+  // 스크롤 감지: 사용자가 위로 스크롤 중인지 판단
+  useEffect(() => {
+    const container = subtitlesContainerRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = container;
+      // 하단에서 80px 이내면 "맨 아래"로 간주
+      const isAtBottom = scrollHeight - scrollTop - clientHeight < 80;
+      isUserScrollingRef.current = !isAtBottom;
+    };
+
+    container.addEventListener('scroll', handleScroll);
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  // 새 자막 추가 시 자동 스크롤 (사용자가 위로 스크롤 중이면 중지)
+  useEffect(() => {
+    if (!isUserScrollingRef.current && subtitlesEndRef.current) {
+      subtitlesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [subtitles]);
 
   // 0. 마이크 권한 명시적 요청
   useEffect(() => {
@@ -271,7 +296,7 @@ export default function CallRoom() {
         )}
       </div>
 
-      <div className="subtitles-container">
+      <div className="subtitles-container" ref={subtitlesContainerRef}>
         {subtitles.length === 0 && (
           <div className="subtitle-empty">
             <p>{isFace2Face ? '🎤 기기를 가운데 두고 번갈아 말씀하세요. 양방향으로 자동 통역됩니다.' : isSolo ? '🎤 외국인의 말을 들려주세요. 번역되어 자막으로 나옵니다.' : '🎤 대화를 시작하면 여기에 실시간 자막이 표시됩니다'}</p>

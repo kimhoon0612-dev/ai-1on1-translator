@@ -312,6 +312,45 @@ CRITICAL RULES:
       case 'response.output_audio_transcript.done':
         if (event.transcript?.trim()) {
           const text = event.transcript.trim();
+          
+          // 환각(Hallucination) 필터 — 실제 발화가 아닌 모델 자체 생성 텍스트 차단
+          const HALLUCINATION_PATTERNS = [
+            /^음성을?\s*텍스트/i,
+            /텍스트로?\s*변환/i,
+            /^자막/i,
+            /^구독/i,
+            /^좋아요/i,
+            /^감사합니다\.?$/i,
+            /^thank\s*you\.?$/i,
+            /^thanks?\s*(for\s*watching)?\.?$/i,
+            /^please\s*subscribe/i,
+            /^bye[\s.!]*$/i,
+            /^you$/i,
+            /^oh\.?$/i,
+            /^um+\.?$/i,
+            /^hmm+\.?$/i,
+            /^uh+\.?$/i,
+            /^MBC\s*뉴스/i,
+            /^SBS/i,
+            /시청해\s*주셔서/i,
+            /구독과\s*좋아요/i,
+            /채널에\s*오신\s*것을/i,
+            /^ご視聴/i,
+            /ありがとうございました\.?$/i,
+          ];
+          
+          const isHallucination = HALLUCINATION_PATTERNS.some(p => p.test(text));
+          if (isHallucination) {
+            console.log(`[STT] ⚠️ 환각 차단: "${text}"`);
+            break;
+          }
+          
+          // 너무 짧은 텍스트도 무시 (1글자)
+          if (text.length <= 1) {
+            console.log(`[STT] ⚠️ 너무 짧은 텍스트 무시: "${text}"`);
+            break;
+          }
+          
           console.log(`[STT] 원문 전사: "${text}"`);
           this.emit('source_transcript', text);
         }
