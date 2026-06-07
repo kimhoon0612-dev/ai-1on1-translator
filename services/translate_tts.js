@@ -45,8 +45,8 @@ export async function translateText(text, targetLang) {
           },
           { role: 'user', content: text }
         ],
-        temperature: 0.3,
-        max_tokens: 1000,
+        temperature: 0.1,
+        max_tokens: 500,
       }),
     });
 

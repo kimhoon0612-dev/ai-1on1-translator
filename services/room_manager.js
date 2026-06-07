@@ -48,10 +48,15 @@ export class RoomManager {
       let targetLang;
       if (this.mode === 'solo') {
         // 혼자 듣기(Solo) 모드에서는 사용자가 선택한 언어가 "내가 보고 듣고 싶은 언어(타겟)"가 됩니다.
-        // 예를 들어 '한국어'를 선택했다면, 유튜브(입력)는 '영어'로 간주하고 '한국어'로 번역합니다.
         targetLang = sourceLang;
         sourceLang = (targetLang === 'ko') ? 'en' : 'ko';
+      } else if (this.mode === 'face2face') {
+        // 대면 통역(Face2Face) 모드: 한 대의 기기에서 두 언어가 번갈아 사용됨
+        // sourceLang = 참가자가 선택한 "내 언어"
+        // targetLang = 방 생성 시 설정한 "상대방 언어"
+        targetLang = this.face2faceOtherLang || (sourceLang === 'ko' ? 'en' : 'ko');
       } else {
+        // 1on1 모드: 상대방 언어가 나의 번역 타겟
         const otherLang = this._getOtherParticipantLang(p.identity);
         targetLang = otherLang || (sourceLang === 'ko' ? 'en' : 'ko');
       }
@@ -100,10 +105,12 @@ export class RoomManager {
           const translatedText = await translateText(sourceText, targetLang);
           console.log(`[Pipeline ${p.identity}] 2. 번역 완료: "${translatedText}"`);
 
-          // 번역 자막 전송 — 상대방에게만 전달되도록 forIdentity 설정
+          // 번역 자막 + 음성 전송 대상 결정
           const targetIdentities = [];
           for (const [tid] of this.participants.entries()) {
-            if (this.mode === 'solo' || tid !== p.identity) {
+            if (this.mode === 'solo' || this.mode === 'face2face' || tid !== p.identity) {
+              // solo/face2face: 자기 자신에게도 전달 (한 대의 기기에서 사용)
+              // 1on1: 상대방에게만 전달
               targetIdentities.push(tid);
             }
           }
